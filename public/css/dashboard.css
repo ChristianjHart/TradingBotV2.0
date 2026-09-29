@@ -881,3 +881,15 @@ button {
     display: none;
   }
 }
+
+/* AI picks + simulated positions */
+.grid-ai { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; margin-top: 12px; }
+.scroll-y { overflow-y: auto; max-height: 420px; }
+.scroll-y.short { max-height: 190px; }
+.reason { color: var(--text-dim, #8b919c); font-size: 12px; max-width: 360px; }
+.pos-row { cursor: pointer; }
+.pos-row.sel { background: rgba(139, 92, 246, 0.12); }
+.pos-chart-head { margin: 10px 0 6px; font-size: 12px; }
+#pos-chart { width: 100%; height: 300px; border-radius: 6px; }
+.widget-title .dim { font-weight: 400; text-transform: none; letter-spacing: 0; }
+@media (max-width: 1100px) { .grid-ai { grid-template-columns: 1fr; } }

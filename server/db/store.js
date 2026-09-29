@@ -63,6 +63,8 @@ const files = {
   logs: path.join(config.dataDir, 'logs.json'),
   settings: path.join(config.dataDir, 'settings.json'),
   worker: path.join(config.dataDir, 'worker.json'),
+  aiPicks: path.join(config.dataDir, 'ai-picks.json'),
+  positions: path.join(config.dataDir, 'positions.json'),
 };
 
 export const store = {
@@ -114,6 +116,20 @@ export const store = {
   },
   setSettings(data) {
     writeJson(files.settings, data);
+  },
+
+  getAiPicks() {
+    return readJson(files.aiPicks, { picks: [], updatedAt: null });
+  },
+  setAiPicks(data) {
+    writeJson(files.aiPicks, data);
+  },
+
+  getPositions() {
+    return readJson(files.positions, []);
+  },
+  setPositions(data) {
+    writeJson(files.positions, data);
   },
 
   getWorker() {

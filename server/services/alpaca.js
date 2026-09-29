@@ -147,7 +147,7 @@ export const alpaca = {
   },
 
   async getQuote(symbol) {
-    const bars = await this.getBars(symbol, { limit: 2 });
+    const bars = await this.getBars(symbol, { limit: this.usingMock() ? 120 : 2 });
     if (!bars.length) return null;
     const last = bars[bars.length - 1];
     const prev = bars[bars.length - 2] || last;
