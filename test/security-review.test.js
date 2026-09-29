@@ -201,7 +201,7 @@ test('M1: NODE_ENV=production and RENDER also fail closed; an ADMIN_TOKEN or a n
   config.adminToken = 'tok-admin-1';
   assert.equal((await call('GET', '/status')).status, 401); // token gate, not setup
   assert.equal((await call('GET', '/status', { headers: { authorization: 'Bearer tok-admin-1' } })).status, 200);
-  assert.equal((await call('GET', '/auth/status')).body.mode, 'token');
+  assert.equal((await call('GET', '/auth/status')).body.mode, 'setup');
   config.adminToken = '';
   delete process.env.RENDER;
   assert.equal((await call('GET', '/status')).status, 200); // local dev stays open

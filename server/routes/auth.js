@@ -45,15 +45,17 @@ export const accountRouter = Router();
 authRouter.get('/status', (req, res) => {
   const s = signupState(req);
   const exists = accountExists();
-  const setup = setupRequired();
+  // First run (no account yet) always shows the create-account screen when the API is gated, whether it is gated
+  // by fail-closed production setup or by an ADMIN_TOKEN — otherwise the browser only ever sees a token prompt.
+  const setup = setupRequired() || (!exists && Boolean(config.adminToken));
   res.json({
     required: authRequired() || setup,
     setupRequired: !exists,
     signupOpen: s.open,
     signupNeedsCode: s.needsCode,
-    mode: setup ? 'setup' : exists ? 'session' : config.adminToken ? 'token' : 'none',
+    mode: setup ? 'setup' : exists ? 'session' : 'none',
     user: req.auth?.user ? { email: req.auth.user.email } : null,
-    ...(setup ? { guidance: setupGuidance() } : {}),
+    ...(setup ? { guidance: setupRequired() ? setupGuidance() : 'No owner account exists yet. Create it here — the setup code is your SIGNUP_CODE (or your ADMIN_TOKEN if SIGNUP_CODE is not set).' } : {}),
   });
 });
 
