@@ -1,5 +1,7 @@
 import { extractFeatures } from './indicators.js';
-import { store } from '../db/store.js';
+
+// Fixed rule weights (the old self-training loop was retired; this is only the rules fallback).
+const MODEL = { version: 1, bias: 0, weights: { momentum: 1, rsi: 1, macd: 1, volume: 1, volatility: 1, trend: 1 } };
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -45,13 +47,12 @@ function confidenceFromScore(raw, components) {
 }
 
 export function predictFromBars(symbol, bars, { horizonHours } = {}) {
-  const model = store.getModel();
-  const settings = store.getSettings();
+  const model = MODEL;
   const features = extractFeatures(bars);
   const { raw, components } = scoreFromFeatures(features, model.weights, model.bias);
   const direction = directionFromScore(raw);
   const confidence = confidenceFromScore(raw, components);
-  const horizon = horizonHours || settings.horizonHours || 24;
+  const horizon = horizonHours || 24;
   const expectedMovePct = clamp(raw * 1.8 * (1 + features.volatility * 5), -8, 8);
   const targetPrice = features.price * (1 + expectedMovePct / 100);
 

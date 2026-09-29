@@ -3,6 +3,9 @@ import { extractFeatures, atr } from './indicators.js';
 import { predictFromBars, rankCandidates } from './predictor.js';
 import { chatJson } from './openrouter.js';
 import { UNIVERSE } from './universe.js';
+import { dailyContext, relStrength, marketRegime } from './context.js';
+import { cleanPicks } from './picks.js';
+import { isCrypto } from './market.js';
 import { config, hasOpenRouterKey } from '../config.js';
 import { store } from '../db/store.js';
 import { insert } from '../db/supabase.js';
@@ -23,12 +26,15 @@ async function mapPool(items, size, fn) {
   return out;
 }
 
-/** Pull bars for the whole universe and reduce each symbol to a compact feature row. */
+/** Pull hourly + daily bars for the whole universe (batched, cached) and reduce each symbol to a compact feature row. */
 export async function gatherMarketData() {
+  await alpaca.prefetch(UNIVERSE, { timeframe: '1Hour', limit: 120 });
+  await alpaca.prefetch(UNIVERSE, { timeframe: '1Day', limit: 40 });
   const rows = await mapPool(UNIVERSE, 8, async (symbol) => {
     try {
       const { bars } = await alpaca.getSnapshot(symbol);
       if (!bars || bars.length < 30) return null;
+      const daily = await alpaca.getBars(symbol, { timeframe: '1Day', limit: 40 }).catch(() => []);
       const f = extractFeatures(bars);
       const a = atr(bars);
       return {
@@ -36,6 +42,7 @@ export async function gatherMarketData() {
         bars,
         price: f.price,
         atrPct: a ? +((a / f.price) * 100).toFixed(2) : null,
+        ctx: dailyContext(daily),
         row: {
           symbol,
           price: +f.price.toFixed(4),
@@ -52,7 +59,22 @@ export async function gatherMarketData() {
       return null;
     }
   });
-  return rows.filter(Boolean);
+  const data = rows.filter(Boolean);
+  const bySym = new Map(data.map((d) => [d.symbol, d]));
+  const spy = bySym.get('SPY')?.ctx;
+  const btc = bySym.get('BTC/USD')?.ctx;
+  for (const d of data) {
+    if (!d.ctx) continue;
+    const rs = relStrength(d.ctx, isCrypto(d.symbol) ? btc : spy);
+    Object.assign(d.row, {
+      ret5d: d.ctx.ret5d,
+      ret20d: d.ctx.ret20d,
+      fromHigh20: d.ctx.distHigh20,
+      fromLow20: d.ctx.distLow20,
+      ...(rs && d.symbol !== 'SPY' && d.symbol !== 'BTC/USD' ? rs : {}),
+    });
+  }
+  return { data, regime: marketRegime(spy, btc) };
 }
 
 function heuristicPicks(data) {
@@ -67,11 +89,13 @@ function heuristicPicks(data) {
     }));
 }
 
-const SYSTEM = `You are a quantitative market screener. You receive a table of technical features for a universe of stocks/ETFs/crypto (hourly bars: mom5/mom20 = % momentum, rsi, macdHist, volRatio = volume vs average, volPct = volatility %, trend = EMA spread %).
-Select up to ${TOP_N} symbols with the most potential for a meaningful move over the next ~24 hours, ranked best first. Each pick needs a direction ("long" or "short"), a confidence between 0 and 1, and a one-sentence reason grounded in the supplied numbers.
+const SYSTEM = `You are a quantitative market screener. You receive a market regime line and a table of features for a universe of stocks/ETFs/crypto.
+Hourly features: mom5/mom20 = % momentum, rsi, macdHist, volRatio = volume vs average, volPct = volatility %, trend = EMA spread %. Daily context: ret5d/ret20d = % return over 5/20 days, fromHigh20/fromLow20 = % distance from the 20-day high (<=0) / low (>=0), rs5d/rs20d = return relative to the benchmark (SPY for stocks/ETFs, BTC for crypto).
+Select up to ${TOP_N} symbols with the most potential for a meaningful move over the next ~24 hours, ranked best first. Each pick needs a direction ("long" or "short"), a confidence between 0 and 1 (be calibrated: 0.5 means a coin flip, reserve >0.8 for exceptional setups), and a one-sentence reason grounded in the supplied numbers.
+Rules: crypto cannot be shorted (long only); list each symbol at most once; keep the book balanced — no more than ~70% of picks in one direction unless the regime clearly justifies it; weigh the regime and relative strength (prefer longs with positive relative strength in risk-on, shorts with negative relative strength in risk-off).
 Reply with ONLY JSON: {"picks":[{"symbol":"...","direction":"long|short","confidence":0.0,"reason":"..."}]}. Use only symbols from the table.`;
 
-export async function runScannerBot(data) {
+export async function runScannerBot(data, { regime } = {}) {
   const known = new Map(data.map((d) => [d.symbol, d]));
   let picks;
   let source;
@@ -83,7 +107,7 @@ export async function runScannerBot(data) {
         bot: 'scanner',
         model: config.openrouter.scannerModel,
         system: SYSTEM,
-        user: JSON.stringify(data.map((d) => d.row)),
+        user: JSON.stringify({ regime: regime?.line || 'unknown', rows: data.map((d) => d.row) }),
         maxTokens: 16000,
       });
       picks = (json.picks || [])
@@ -106,17 +130,14 @@ export async function runScannerBot(data) {
     source = 'rules';
   }
 
-  const seen = new Set();
-  picks = picks
-    .filter((p) => (seen.has(p.symbol) ? false : seen.add(p.symbol)))
-    .slice(0, TOP_N)
-    .map((p) => ({ ...p, price: known.get(p.symbol).price, atrPct: known.get(p.symbol).atrPct }));
+  picks = cleanPicks(picks, { limit: TOP_N }).map((p) => ({ ...p, price: known.get(p.symbol).price, atrPct: known.get(p.symbol).atrPct }));
 
   const result = {
     picks,
     updatedAt: new Date().toISOString(),
     source,
     model,
+    regime: regime?.line || null,
     universe: UNIVERSE.length,
     scanned: data.length,
   };

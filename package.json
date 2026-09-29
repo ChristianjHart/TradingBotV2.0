@@ -1,15 +1,16 @@
 {
   "name": "tradingbot-v2",
   "version": "2.0.0",
-  "description": "AI market scanner & prediction dashboard \u2014 watch, predict, learn. No live trading.",
+  "description": "AI market scanner, simulated trader bots & performance dashboard. Paper trading only \u2014 no real orders.",
   "main": "server/index.js",
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "scan": "node server/cli/scan.js",
-    "evaluate": "node server/cli/evaluate.js",
-    "logs": "node scripts/pull-logs.mjs"
+    "test": "node --test test/*.test.js",
+    "check": "find server scripts test -name '*.js' -o -name '*.mjs' | xargs -n1 node --check",
+    "logs": "node scripts/pull-logs.mjs",
+    "prune": "node scripts/prune-logs.mjs"
   },
   "engines": {
     "node": ">=18"

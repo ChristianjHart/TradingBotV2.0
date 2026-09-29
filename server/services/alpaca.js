@@ -1,17 +1,7 @@
 import { config, hasAlpacaCredentials } from '../config.js';
 import { loggedFetch } from './http.js';
-
-const UNIVERSE = {
-  stocks: [
-    'SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT', 'NVDA', 'AMZN', 'META', 'GOOGL', 'TSLA',
-    'AMD', 'NFLX', 'COIN', 'PLTR', 'CRM', 'AVGO', 'JPM', 'BAC', 'XOM', 'UNH',
-    'COST', 'DIS', 'BA', 'UBER', 'SHOP', 'XYZ', 'SOFI', 'RIVN', 'SMCI', 'ARM',
-  ],
-  crypto: [
-    'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD',
-    'DOT/USD', 'LTC/USD', 'UNI/USD', 'AAVE/USD',
-  ],
-};
+import { validateBars } from './bars.js';
+import { isCrypto, assetClassOf, isStale } from './market.js';
 
 function seed(symbol) {
   let h = 0;
@@ -19,8 +9,11 @@ function seed(symbol) {
   return h;
 }
 
-function mockBars(symbol, limit = 100) {
+const STEP_MS = { '1Hour': 3600_000, '1Day': 86_400_000 };
+
+function mockBars(symbol, limit = 100, timeframe = '1Hour') {
   const s = seed(symbol);
+  const step = STEP_MS[timeframe] || 3600_000;
   const base =
     symbol.includes('BTC') ? 68000 :
     symbol.includes('ETH') ? 3400 :
@@ -40,7 +33,7 @@ function mockBars(symbol, limit = 100) {
     const low = Math.min(open, close) * (1 - 0.002 - (i % 4) * 0.0008);
     const volume = 500000 + ((s + i * 997) % 2000000);
     bars.push({
-      t: new Date(now - i * 3600_000).toISOString(),
+      t: new Date(now - i * step).toISOString(),
       o: +open.toFixed(4),
       h: +high.toFixed(4),
       l: +low.toFixed(4),
@@ -52,37 +45,88 @@ function mockBars(symbol, limit = 100) {
   return bars;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Exponential backoff with jitter; honours a Retry-After header (seconds), capped. */
+export function backoffMs(attempt, retryAfter, rand = Math.random) {
+  const ra = Number(retryAfter);
+  if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 15_000);
+  return Math.min(400 * 2 ** attempt + rand() * 250, 8_000);
+}
+
+const MAX_ATTEMPTS = 4;
+
+/** GET against Alpaca with retry on network errors, 429 and 5xx. */
 async function alpacaFetch(urlPath, { data = true } = {}) {
   const base = data ? config.alpaca.dataUrl : config.alpaca.baseUrl;
-  const res = await loggedFetch('alpaca', `${base}${urlPath}`, {
-    headers: {
-      'APCA-API-KEY-ID': config.alpaca.key,
-      'APCA-API-SECRET-KEY': config.alpaca.secret,
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Alpaca ${res.status}: ${text.slice(0, 200)}`);
+  const headers = { 'APCA-API-KEY-ID': config.alpaca.key, 'APCA-API-SECRET-KEY': config.alpaca.secret };
+  let lastErr;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let retryAfter;
+    try {
+      const res = await loggedFetch('alpaca', `${base}${urlPath}`, { headers });
+      if (res.ok) return await res.json();
+      const text = await res.text();
+      lastErr = new Error(`Alpaca ${res.status}: ${text.slice(0, 200)}`);
+      if (res.status !== 429 && res.status < 500) throw Object.assign(lastErr, { fatal: true });
+      retryAfter = res.headers.get('retry-after');
+    } catch (err) {
+      if (err.fatal) throw err;
+      lastErr = err;
+    }
+    if (attempt < MAX_ATTEMPTS - 1) await sleep(backoffMs(attempt, retryAfter));
   }
-  return res.json();
+  throw lastErr;
 }
 
-// Alpaca defaults `start` to the current day, which yields too few bars on
-// weekends / pre-market. Ask for a window and take the newest bars (sort=desc).
-function lookbackStart(days = 30) {
-  return new Date(Date.now() - days * 86400_000).toISOString();
+const toAlpacaCrypto = (s) => (s.includes('/') ? s : `${s.slice(0, -3)}/${s.slice(-3)}`);
+const LOOKBACK_DAYS = { equity: { '1Hour': 30, '1Day': 90 }, crypto: { '1Hour': 7, '1Day': 90 } };
+
+/** Multi-symbol bars (paginated). Returns Map(symbol -> raw bars ascending). Symbols must share an asset class. */
+async function fetchBatch(symbols, timeframe) {
+  const crypto = isCrypto(symbols[0]);
+  const names = symbols.map((s) => (crypto ? toAlpacaCrypto(s) : s));
+  const back = LOOKBACK_DAYS[crypto ? 'crypto' : 'equity'][timeframe] || 30;
+  const out = new Map();
+  let token = '';
+  for (let page = 0; page < 10; page++) {
+    const q = new URLSearchParams({
+      symbols: names.join(','),
+      timeframe,
+      limit: '10000',
+      start: new Date(Date.now() - back * 86400_000).toISOString(),
+      sort: 'asc',
+      ...(crypto ? {} : { adjustment: 'split', feed: 'iex' }),
+      ...(token ? { page_token: token } : {}),
+    });
+    const data = await alpacaFetch(`${crypto ? '/v1beta3/crypto/us/bars' : '/v2/stocks/bars'}?${q}`);
+    for (const [name, bars] of Object.entries(data.bars || {})) {
+      const sym = symbols.find((s) => s === name || toAlpacaCrypto(s) === name) || name;
+      out.set(sym, (out.get(sym) || []).concat(bars));
+    }
+    token = data.next_page_token;
+    if (!token) break;
+  }
+  return out;
 }
 
-function isCrypto(symbol) {
-  return symbol.includes('/') || symbol.endsWith('USD') && ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOGE', 'DOT', 'LTC', 'UNI', 'AAVE'].some((c) => symbol.startsWith(c));
-}
-
+const CACHE_TTL_MS = 60_000;
+const cache = new Map(); // `${symbol}|${timeframe}` -> { at, limit, bars }
 // Symbols whose last live fetch failed and were served mock data instead.
 const fallbacks = new Map();
+// symbol -> true when the latest live bar is stale (closed market / old data)
+const staleMap = new Map();
+
+function remember(symbol, timeframe, limit, rawBars) {
+  const { bars } = validateBars(rawBars);
+  if (!bars.length) return null;
+  cache.set(`${symbol}|${timeframe}`, { at: Date.now(), limit, bars: bars.slice(-limit) });
+  fallbacks.delete(symbol);
+  if (timeframe === '1Hour') staleMap.set(symbol, isStale(symbol, bars[bars.length - 1].t));
+  return bars.slice(-limit);
+}
 
 export const alpaca = {
-  universe: UNIVERSE,
-
   getFallbacks() {
     return {
       count: fallbacks.size,
@@ -90,65 +134,64 @@ export const alpaca = {
     };
   },
 
+  /** Symbols currently served from stale data (equities outside the session, or old bars). */
+  getStale() {
+    return [...staleMap.entries()].filter(([, v]) => v).map(([k]) => k);
+  },
+
+  isStale(symbol) {
+    return !this.usingMock() && Boolean(staleMap.get(symbol));
+  },
+
   usingMock() {
     return config.useMockData || !hasAlpacaCredentials();
   },
 
-  async getBars(symbol, { timeframe = '1Hour', limit = 100 } = {}) {
-    if (this.usingMock()) return mockBars(symbol, limit);
+  /** Drop cached bars (start of every run). */
+  clearCache() {
+    cache.clear();
+  },
 
-    try {
-      if (isCrypto(symbol)) {
-        const sym = symbol.includes('/') ? symbol : `${symbol.slice(0, -3)}/${symbol.slice(-3)}`;
-        const q = new URLSearchParams({
-          timeframe: timeframe === '1Hour' ? '1Hour' : timeframe,
-          limit: String(limit),
-          start: lookbackStart(),
-          sort: 'desc',
-        });
-        const data = await alpacaFetch(`/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(sym)}&${q}`);
-        const bars = data.bars?.[sym] || data.bars?.[symbol] || [];
-        if (!bars.length) throw new Error('no bars returned');
-        fallbacks.delete(symbol);
-        return bars.reverse().map((b) => ({
-          t: b.t,
-          o: b.o,
-          h: b.h,
-          l: b.l,
-          c: b.c,
-          v: b.v,
-        }));
+  /** Warm the cache with a few multi-symbol requests instead of one request per symbol. Failures are silent (getBars falls back). */
+  async prefetch(symbols, { timeframe = '1Hour', limit = 120 } = {}) {
+    if (this.usingMock()) return;
+    const groups = [
+      symbols.filter((s) => !isCrypto(s)),
+      symbols.filter((s) => isCrypto(s)),
+    ];
+    for (const group of groups) {
+      for (let i = 0; i < group.length; i += 25) {
+        const chunk = group.slice(i, i + 25);
+        try {
+          const got = await fetchBatch(chunk, timeframe);
+          for (const [sym, bars] of got) remember(sym, timeframe, limit, bars);
+        } catch (err) {
+          console.warn(`[alpaca] batch bars failed (${chunk.length} symbols): ${err.message}`);
+        }
       }
+    }
+  },
 
-      const q = new URLSearchParams({
-        timeframe,
-        limit: String(limit),
-        adjustment: 'split',
-        feed: 'iex',
-        start: lookbackStart(),
-        sort: 'desc',
-      });
-      const data = await alpacaFetch(`/v2/stocks/${encodeURIComponent(symbol)}/bars?${q}`);
-      if (!data.bars?.length) throw new Error('no bars returned');
-      fallbacks.delete(symbol);
-      return data.bars.reverse().map((b) => ({
-        t: b.t,
-        o: b.o,
-        h: b.h,
-        l: b.l,
-        c: b.c,
-        v: b.v,
-      }));
+  async getBars(symbol, { timeframe = '1Hour', limit = 100 } = {}) {
+    if (this.usingMock()) return mockBars(symbol, limit, timeframe);
+    const hit = cache.get(`${symbol}|${timeframe}`);
+    if (hit && hit.limit >= limit && Date.now() - hit.at < CACHE_TTL_MS) return hit.bars.slice(-limit);
+    try {
+      const want = Math.max(limit, 120);
+      const got = await fetchBatch([symbol], timeframe);
+      const bars = remember(symbol, timeframe, want, got.get(symbol) || []);
+      if (!bars) throw new Error('no valid bars returned');
+      return bars.slice(-limit);
     } catch (err) {
       // Soft-fallback so the dashboard still works offline / without keys
       console.warn(`[alpaca] bars failed for ${symbol}, using mock:`, err.message);
       fallbacks.set(symbol, { error: err.message, at: new Date().toISOString() });
-      return mockBars(symbol, limit);
+      return mockBars(symbol, limit, timeframe);
     }
   },
 
   async getQuote(symbol) {
-    const bars = await this.getBars(symbol, { limit: this.usingMock() ? 120 : 2 });
+    const bars = await this.getBars(symbol, { limit: 120 });
     if (!bars.length) return null;
     const last = bars[bars.length - 1];
     const prev = bars[bars.length - 2] || last;
@@ -158,7 +201,8 @@ export const alpaca = {
       price: last.c,
       changePct,
       asOf: last.t,
-      assetClass: isCrypto(symbol) ? 'crypto' : 'equity',
+      assetClass: assetClassOf(symbol),
+      stale: this.isStale(symbol),
     };
   },
 
@@ -186,7 +230,8 @@ export const alpaca = {
               ? ((bars[bars.length - 1].c - bars[bars.length - 2].c) / bars[bars.length - 2].c) * 100
               : 0,
           asOf: bars[bars.length - 1].t,
-          assetClass: isCrypto(symbol) ? 'crypto' : 'equity',
+          assetClass: assetClassOf(symbol),
+          stale: this.isStale(symbol),
         }
       : null;
     return { symbol, bars, quote };

@@ -4,12 +4,11 @@ AI market scanner & prediction dashboard. Same look and feel as the classic trad
 
 ## What it does
 
-- **Super-scans** equities + crypto (Alpaca when configured, mock data otherwise)
-- Builds a **daily watchlist** with direction, confidence, and expected move
-- Logs **predictions** with a horizon (default 24h) — long / short only, no orders
-- **Evaluates** predictions after they resolve (hit / miss)
-- **Trains** a lightweight scoring model from outcomes so the scanner improves over time
-- Embeds **TradingView** charts + a custom candle chart with EMA / VWAP / volume
+- **Scanner bot** screens ~120 equities + crypto (hourly + daily context, relative strength, market regime) via OpenRouter, with a rule-based fallback
+- **Trader bot** turns picks into **simulated** positions: ATR stops, slippage + fees, gap-aware fills, break-even / trailing stops, time exit, portfolio risk limits, daily-loss halt
+- **Scores every pick** after its horizon and reports confidence calibration (`/api/performance`)
+- Persists runs, positions, equity snapshots and picks to Supabase (optional) and restores them on boot
+- Never places real orders. Alpaca is used for market data only
 
 ## Quick start
 
@@ -48,31 +47,35 @@ USE_MOCK_DATA=false
 
 The app only uses Alpaca for **market data**. Order endpoints are never called.
 
-## Dashboard map (old UI → new meaning)
+## Security
 
-| Old widget | V2.0 |
-|---|---|
-| Allocation | Open prediction mix (long / short / watch) |
-| Portfolio | Prediction accuracy over time |
-| Buying power | Scanner coverage (scanned / universe) |
-| Positions | Open predictions |
-| Recent trades | Settled hit / miss results |
-| Bot performance | AI accuracy + model version |
-| Bot log | AI / scanner log |
-| Strategies | Signal engines (trading router stays OFF) |
+Set `ADMIN_TOKEN` to require `Authorization: Bearer <token>` on mutating/costly endpoints (`POST /api/run`, `/scan`, `/evaluate`, `/train`, `/positions/*/close`, `/positions/close-all`, `/worker/*`, `PATCH /settings`). Unset = open (local use). `GET /api/auth/status` reports `{required}`. CORS is same-origin unless `CORS_ORIGIN` is set; `POST /api/run` is rate limited; settings are whitelisted and range-checked.
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/dashboard` | Full dashboard payload |
-| POST | `/api/scan` | Run a full market scan |
-| GET | `/api/watchlist` | Today's AI watchlist |
-| GET | `/api/predictions` | Prediction history |
-| POST | `/api/evaluate` | Resolve due predictions |
-| POST | `/api/train` | Retrain model weights |
-| GET | `/api/accuracy` | Hit rate stats |
-| POST | `/api/worker/stop` \| `/kill` \| `/start` | Worker controls |
+| POST | `/api/run` | Start scanner → trader run (auth) |
+| GET | `/api/run/status` | Progress of the current run |
+| GET | `/api/runs?limit=20` | Persisted run history |
+| GET | `/api/ai/summary` \| `/api/ai/picks` | Latest run summary / picks |
+| GET | `/api/positions` | Account, open (with live P&L, `stale`) and closed positions |
+| POST | `/api/positions/:id/close` \| `/api/positions/close-all` | Manual close (auth) |
+| GET | `/api/performance` | Equity curve, win rate, avg R, drawdown, calibration, per-bot stats |
+| GET | `/api/status` | Worker, settings, `marketOpen`, `staleSymbols`, data mode |
+| PATCH | `/api/settings` | Slippage/fees/risk limits/horizon (auth) |
+| GET | `/api/health` \| `/api/auth/status` | Public |
+
+Legacy endpoints (`/dashboard`, `/watchlist`, `/predictions`, `/accuracy`, `/model`) still respond, now derived from scanner picks; `/scan` starts a run and `/train` is a no-op.
+
+## Tests & maintenance
+
+```bash
+npm test            # node:test unit tests (CI runs these + syntax checks)
+npm run prune       # delete Supabase log rows older than 14 days (-- --days N)
+```
+
+Run `supabase/migrations/001_init.sql` then `002_runs.sql` (runs, equity snapshots, pick scores, `prune_logs()`).
 
 ## Stack
 

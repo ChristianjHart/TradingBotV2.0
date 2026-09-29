@@ -1,15 +1,18 @@
 import { chatJson } from './openrouter.js';
 import { config, hasOpenRouterKey } from '../config.js';
 import { store } from '../db/store.js';
-import { getAccount, openPosition } from './positions.js';
+import { getAccount, openPosition, livePrices } from './positions.js';
+import { applySlippage, feeFor } from './fills.js';
+import { limitsFrom, dailyPnl, isHalted, checkEntry } from './risk.js';
+import { isCrypto } from './market.js';
 
 const MAX_POSITION_PCT = 0.2; // of equity, per trade
 const MAX_RISK_PCT = 0.02; // of equity lost if the stop is hit
 
 const SYSTEM = `You are a disciplined risk-aware trading desk. You receive screened candidates (with price and ATR% = hourly average true range as % of price), the account state, and the number of free position slots.
 Decide which candidates are actually worth trading and choose AT MOST the given number of slots. For each trade give: symbol, side ("long" or "short"), allocationUsd (dollars of the account to commit), stopLoss (a price that exits the trade if it moves against us, so we never lose the whole allocation), takeProfit (a price at which we lock in the gain), and a one-sentence reason.
-Rules: stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
-Reply with ONLY JSON: {"summary":"1-2 sentences on why you chose these trades and what you passed on","trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
+Rules: crypto can only be traded long (never short crypto); stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
+The desk enforces portfolio limits (gross/asset-class exposure, sector concentration, daily loss halt), so prefer diversified picks. Reply with ONLY JSON: {"summary":"1-2 sentences on why you chose these trades and what you passed on","trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
 
 function rulesTrades(cands, slots, cash) {
   const picks = cands.slice(0, slots);
@@ -28,19 +31,28 @@ function rulesTrades(cands, slots, cash) {
 }
 
 /** Validate/clamp whatever the model proposed, then open simulated positions. */
-export async function runTraderBot(picks) {
+export async function runTraderBot(picks, { regime } = {}) {
   const open = store.getPositions().filter((p) => p.status === 'open');
   const slots = Math.max(0, config.maxOpenPositions - open.length);
   const openSyms = new Set(open.map((p) => p.symbol));
   const cands = picks
     .filter((p) => !openSyms.has(p.symbol))
+    .filter((p) => !(p.direction === 'short' && isCrypto(p.symbol)))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 30);
   if (!slots || !cands.length) {
     return { source: 'none', opened: [], skippedList: [], note: slots ? 'no candidates to trade' : 'all position slots are full' };
   }
 
-  const account = getAccount();
+  const settings = store.getSettings();
+  const limits = limitsFrom(settings);
+  const prices = await livePrices(open);
+  const account = getAccount(prices);
+  if (isHalted(dailyPnl(store.getPositions(), account.unrealizedPnl), account.equity, limits)) {
+    const note = `daily loss halt: today's P&L is below -${settings.dailyLossHaltPct}% of equity — no new trades`;
+    store.addLog({ level: 'warn', message: `trader bot: ${note}` });
+    return { source: 'none', opened: [], skippedList: [], note, halted: true };
+  }
   let proposed;
   let note = '';
   let source = 'ai';
@@ -54,6 +66,7 @@ export async function runTraderBot(picks) {
         user: JSON.stringify({
           account: { equity: account.equity, cash: account.cash },
           freeSlots: slots,
+          regime: regime?.line,
           candidates: cands.map((c) => ({
             symbol: c.symbol,
             direction: c.direction,
@@ -93,7 +106,12 @@ export async function runTraderBot(picks) {
       skipped.push(`${t.symbol} (duplicate)`);
       continue;
     }
-    const entry = c.price;
+    if (t.side === 'short' && isCrypto(t.symbol)) {
+      skipped.push(`${t.symbol} (crypto cannot be shorted)`);
+      continue;
+    }
+    const quoted = c.price;
+    const entry = applySlippage(quoted, t.side, 'entry', settings.slippageBps);
     let stop = Number(t.stopLoss);
     let target = Number(t.takeProfit);
     const long = t.side === 'long';
@@ -110,6 +128,12 @@ export async function runTraderBot(picks) {
     let alloc = Number(t.allocationUsd);
     if (!Number.isFinite(alloc)) alloc = Infinity;
     alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / riskDist, cash);
+    const gate = checkEntry({ open: [...open, ...opened], equity: account.equity, symbol: t.symbol, alloc, limits });
+    if (!gate.ok) {
+      skipped.push(`${t.symbol} (${gate.reason})`);
+      continue;
+    }
+    alloc = gate.alloc;
     if (!(alloc >= 100)) {
       skipped.push(`${t.symbol} (no cash left)`);
       continue;
@@ -124,6 +148,8 @@ export async function runTraderBot(picks) {
       takeProfit: +target.toFixed(4),
       allocation: +alloc.toFixed(2),
       qty: +(alloc / entry).toFixed(6),
+      fees: feeFor(alloc, settings.feeBps),
+      slippage: +(Math.abs(entry - quoted) * (alloc / entry)).toFixed(2),
       confidence: c.confidence,
       reason: String(t.reason || c.reason).slice(0, 300),
       source,

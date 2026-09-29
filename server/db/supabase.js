@@ -16,7 +16,7 @@ function headers(extra = {}) {
 }
 
 // PostgREST bulk inserts require every object to have the same keys.
-function normalize(rows) {
+export function normalize(rows) {
   const keys = new Set(rows.flatMap((r) => Object.keys(r)));
   return rows.map((r) => Object.fromEntries([...keys].map((k) => [k, r[k] === undefined ? null : r[k]])));
 }
