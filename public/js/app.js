@@ -71,6 +71,7 @@ function renderDashboard() {
   root.innerHTML = `
     <div class="page">
       ${d.mockData ? `<div class="banner-mock">Running on mock market data — add Alpaca keys in <code>.env</code> for live scans.</div>` : ''}
+      ${!d.mockData && d.fallbacks?.count ? `<div class="banner-mock">Live data failed for ${d.fallbacks.count} symbol(s) — showing MOCK prices for: ${d.fallbacks.symbols.map((f) => `<code title="${escapeHtml(f.error)}">${escapeHtml(f.symbol)}</code>`).join(' ')}</div>` : ''}
       <div class="page-toolbar">
         <div class="tabs">
           <button class="tab active" type="button">Dashboard</button>

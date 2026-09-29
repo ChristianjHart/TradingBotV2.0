@@ -8,7 +8,7 @@ const UNIVERSE = {
   ],
   crypto: [
     'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD',
-    'DOT/USD', 'MATIC/USD', 'UNI/USD', 'AAVE/USD',
+    'DOT/USD', 'LTC/USD', 'UNI/USD', 'AAVE/USD',
   ],
 };
 
@@ -66,12 +66,28 @@ async function alpacaFetch(urlPath, { data = true } = {}) {
   return res.json();
 }
 
-function isCrypto(symbol) {
-  return symbol.includes('/') || symbol.endsWith('USD') && ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOGE', 'DOT', 'MATIC', 'UNI', 'AAVE'].some((c) => symbol.startsWith(c));
+// Alpaca defaults `start` to the current day, which yields too few bars on
+// weekends / pre-market. Ask for a window and take the newest bars (sort=desc).
+function lookbackStart(days = 30) {
+  return new Date(Date.now() - days * 86400_000).toISOString();
 }
+
+function isCrypto(symbol) {
+  return symbol.includes('/') || symbol.endsWith('USD') && ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOGE', 'DOT', 'LTC', 'UNI', 'AAVE'].some((c) => symbol.startsWith(c));
+}
+
+// Symbols whose last live fetch failed and were served mock data instead.
+const fallbacks = new Map();
 
 export const alpaca = {
   universe: UNIVERSE,
+
+  getFallbacks() {
+    return {
+      count: fallbacks.size,
+      symbols: [...fallbacks.entries()].map(([symbol, f]) => ({ symbol, ...f })),
+    };
+  },
 
   usingMock() {
     return config.useMockData || !hasAlpacaCredentials();
@@ -86,10 +102,14 @@ export const alpaca = {
         const q = new URLSearchParams({
           timeframe: timeframe === '1Hour' ? '1Hour' : timeframe,
           limit: String(limit),
+          start: lookbackStart(),
+          sort: 'desc',
         });
         const data = await alpacaFetch(`/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(sym)}&${q}`);
         const bars = data.bars?.[sym] || data.bars?.[symbol] || [];
-        return bars.map((b) => ({
+        if (!bars.length) throw new Error('no bars returned');
+        fallbacks.delete(symbol);
+        return bars.reverse().map((b) => ({
           t: b.t,
           o: b.o,
           h: b.h,
@@ -104,9 +124,13 @@ export const alpaca = {
         limit: String(limit),
         adjustment: 'split',
         feed: 'iex',
+        start: lookbackStart(),
+        sort: 'desc',
       });
       const data = await alpacaFetch(`/v2/stocks/${encodeURIComponent(symbol)}/bars?${q}`);
-      return (data.bars || []).map((b) => ({
+      if (!data.bars?.length) throw new Error('no bars returned');
+      fallbacks.delete(symbol);
+      return data.bars.reverse().map((b) => ({
         t: b.t,
         o: b.o,
         h: b.h,
@@ -117,6 +141,7 @@ export const alpaca = {
     } catch (err) {
       // Soft-fallback so the dashboard still works offline / without keys
       console.warn(`[alpaca] bars failed for ${symbol}, using mock:`, err.message);
+      fallbacks.set(symbol, { error: err.message, at: new Date().toISOString() });
       return mockBars(symbol, limit);
     }
   },

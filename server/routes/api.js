@@ -15,6 +15,7 @@ router.get('/health', (_req, res) => {
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
     mockData: alpaca.usingMock(),
+    fallbacks: alpaca.getFallbacks(),
   });
 });
 
@@ -32,6 +33,7 @@ router.get('/status', (_req, res) => {
     alpacaConfigured: hasAlpacaCredentials(),
     mockData: alpaca.usingMock(),
     dataMode: alpaca.usingMock() ? 'mock' : 'alpaca',
+    fallbacks: alpaca.getFallbacks(),
   });
 });
 
@@ -193,6 +195,7 @@ router.get('/dashboard', async (_req, res) => {
       allocation,
       tradingEnabled: false,
       mockData: alpaca.usingMock(),
+      fallbacks: alpaca.getFallbacks(),
       horizonHours: config.predictionHorizonHours,
     });
   } catch (err) {
