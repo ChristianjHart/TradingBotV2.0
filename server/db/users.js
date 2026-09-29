@@ -96,6 +96,16 @@ export const usersRepo = {
         console.log(`[users] Supabase has no accounts yet (${users.length} local account(s) pushed up)`);
         return false;
       } catch (err) {
+        // PostgREST says the TABLE does not exist: migration 003 was never applied, so Supabase cannot be holding an
+        // account we failed to read. That is a setup gap, not an outage — do not lock the owner out of first-run signup.
+        if (/PGRST205|Could not find the table/i.test(String(err.message))) {
+          restoreState = 'ok';
+          console.warn(
+            '[users] WARNING: table public.app_users does not exist — run supabase/setup_all.sql in the Supabase SQL Editor. ' +
+              `Until then accounts are stored only on this server's disk (${users.length} local account(s)); a redeploy that wipes the disk will send the site back to first-run setup.`,
+          );
+          return false;
+        }
         console.warn(`[users] restore from Supabase failed (attempt ${i}/${attempts}): ${err.message}`);
         if (i < attempts) await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** (i - 1)));
       }
