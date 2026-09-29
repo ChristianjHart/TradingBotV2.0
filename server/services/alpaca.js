@@ -4,7 +4,7 @@ const UNIVERSE = {
   stocks: [
     'SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT', 'NVDA', 'AMZN', 'META', 'GOOGL', 'TSLA',
     'AMD', 'NFLX', 'COIN', 'PLTR', 'CRM', 'AVGO', 'JPM', 'BAC', 'XOM', 'UNH',
-    'COST', 'DIS', 'BA', 'UBER', 'SHOP', 'SQ', 'SOFI', 'RIVN', 'SMCI', 'ARM',
+    'COST', 'DIS', 'BA', 'UBER', 'SHOP', 'XYZ', 'SOFI', 'RIVN', 'SMCI', 'ARM',
   ],
   crypto: [
     'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD',
