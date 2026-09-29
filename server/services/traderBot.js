@@ -46,6 +46,7 @@ export async function runTraderBot(picks) {
   if (hasOpenRouterKey()) {
     try {
       const { json } = await chatJson({
+        bot: 'trader',
         model,
         system: SYSTEM,
         user: JSON.stringify({

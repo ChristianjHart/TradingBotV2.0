@@ -5,6 +5,7 @@ import { runMarketScan, ensureTodayWatchlist } from '../services/scanner.js';
 import { evaluateOpenPredictions, getAccuracyStats } from '../services/evaluator.js';
 import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
 import { trainFromOutcomes } from '../services/trainer.js';
+import { supabaseEnabled } from '../db/supabase.js';
 import { startAiRun, runState } from '../services/aiRun.js';
 import { listPositions, closeManually } from '../services/positions.js';
 
@@ -17,6 +18,7 @@ router.get('/health', (_req, res) => {
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
+    supabaseConfigured: supabaseEnabled,
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),
   });

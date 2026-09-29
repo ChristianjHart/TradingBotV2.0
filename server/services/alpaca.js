@@ -1,4 +1,5 @@
 import { config, hasAlpacaCredentials } from '../config.js';
+import { loggedFetch } from './http.js';
 
 const UNIVERSE = {
   stocks: [
@@ -53,7 +54,7 @@ function mockBars(symbol, limit = 100) {
 
 async function alpacaFetch(urlPath, { data = true } = {}) {
   const base = data ? config.alpaca.dataUrl : config.alpaca.baseUrl;
-  const res = await fetch(`${base}${urlPath}`, {
+  const res = await loggedFetch('alpaca', `${base}${urlPath}`, {
     headers: {
       'APCA-API-KEY-ID': config.alpaca.key,
       'APCA-API-SECRET-KEY': config.alpaca.secret,

@@ -1,6 +1,33 @@
 import { alpaca } from './alpaca.js';
 import { config } from '../config.js';
 import { store } from '../db/store.js';
+import { upsert } from '../db/supabase.js';
+
+function syncRow(p) {
+  upsert('positions', {
+    id: p.id,
+    symbol: p.symbol,
+    side: p.side,
+    status: p.status,
+    entry: p.entry,
+    stop_loss: p.stopLoss,
+    take_profit: p.takeProfit,
+    allocation: p.allocation,
+    qty: p.qty,
+    confidence: p.confidence,
+    reason: p.reason,
+    source: p.source,
+    model: p.model,
+    opened_at: p.openedAt,
+    closed_at: p.closedAt ?? null,
+    exit_price: p.exitPrice ?? null,
+    exit_reason: p.exitReason ?? null,
+    pnl: p.pnl ?? null,
+    pnl_pct: p.pnlPct ?? null,
+    raw: p,
+    updated_at: new Date().toISOString(),
+  });
+}
 
 // All positions are SIMULATED (paper). No orders are ever sent anywhere.
 
@@ -32,13 +59,15 @@ export function getAccount(livePrices = {}) {
 
 export function openPosition(t) {
   const positions = store.getPositions();
-  positions.unshift({
+  const pos = {
     id: `pos_${Date.now()}_${t.symbol.replace(/\W/g, '')}`,
     status: 'open',
     openedAt: new Date().toISOString(),
     ...t,
-  });
+  };
+  positions.unshift(pos);
   store.setPositions(positions.slice(0, 1000));
+  syncRow(pos);
 }
 
 function closeIn(list, p, exitPrice, reason) {
@@ -48,6 +77,7 @@ function closeIn(list, p, exitPrice, reason) {
   p.closedAt = new Date().toISOString();
   p.pnl = pnlFor(p, exitPrice);
   p.pnlPct = +((p.pnl / p.allocation) * 100).toFixed(2);
+  syncRow(p);
   store.addLog({
     level: p.pnl >= 0 ? 'info' : 'warn',
     message: `position closed ${p.side.toUpperCase()} ${p.symbol} @ ${p.exitPrice} (${reason}) P&L ${p.pnl}`,
