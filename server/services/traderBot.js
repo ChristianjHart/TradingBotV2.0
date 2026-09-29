@@ -9,7 +9,7 @@ const MAX_RISK_PCT = 0.02; // of equity lost if the stop is hit
 const SYSTEM = `You are a disciplined risk-aware trading desk. You receive screened candidates (with price and ATR% = hourly average true range as % of price), the account state, and the number of free position slots.
 Decide which candidates are actually worth trading and choose AT MOST the given number of slots. For each trade give: symbol, side ("long" or "short"), allocationUsd (dollars of the account to commit), stopLoss (a price that exits the trade if it moves against us, so we never lose the whole allocation), takeProfit (a price at which we lock in the gain), and a one-sentence reason.
 Rules: stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
-Reply with ONLY JSON: {"trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
+Reply with ONLY JSON: {"summary":"1-2 sentences on why you chose these trades and what you passed on","trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
 
 function rulesTrades(cands, slots, cash) {
   const picks = cands.slice(0, slots);
@@ -37,11 +37,12 @@ export async function runTraderBot(picks) {
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 30);
   if (!slots || !cands.length) {
-    return { source: 'none', opened: [], skipped: slots ? 'no candidates' : 'position slots full' };
+    return { source: 'none', opened: [], skippedList: [], note: slots ? 'no candidates to trade' : 'all position slots are full' };
   }
 
   const account = getAccount();
   let proposed;
+  let note = '';
   let source = 'ai';
   let model = config.openrouter.traderModel;
   if (hasOpenRouterKey()) {
@@ -66,6 +67,7 @@ export async function runTraderBot(picks) {
         timeoutMs: 90_000,
       });
       proposed = json.trades || [];
+      note = String(json.summary || '').slice(0, 500);
     } catch (err) {
       store.addLog({ level: 'warn', message: `trader bot AI failed (${err.message}) — using rule-based fallback` });
     }
@@ -134,5 +136,5 @@ export async function runTraderBot(picks) {
     level: 'info',
     message: `trader bot (${source}): model proposed ${proposed.length} of ${cands.length} candidates, opened ${opened.length} (slots ${slots})${skipped.length ? `; rejected: ${skipped.join(', ')}` : ''}`,
   });
-  return { source, model, opened };
+  return { source, model, opened, skippedList: skipped, proposed: proposed.length, note };
 }

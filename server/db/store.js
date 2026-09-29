@@ -66,6 +66,7 @@ const files = {
   worker: path.join(config.dataDir, 'worker.json'),
   aiPicks: path.join(config.dataDir, 'ai-picks.json'),
   positions: path.join(config.dataDir, 'positions.json'),
+  runSummary: path.join(config.dataDir, 'run-summary.json'),
 };
 
 export const store = {
@@ -125,6 +126,13 @@ export const store = {
   },
   setAiPicks(data) {
     writeJson(files.aiPicks, data);
+  },
+
+  getRunSummary() {
+    return readJson(files.runSummary, null);
+  },
+  setRunSummary(data) {
+    writeJson(files.runSummary, data);
   },
 
   getPositions() {

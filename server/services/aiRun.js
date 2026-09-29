@@ -44,6 +44,27 @@ export function startAiRun() {
       runState.stage = 'trading';
       const trades = await runTraderBot(scan.picks);
       runState.opened = trades.opened.length;
+      store.setRunSummary({
+        at: new Date().toISOString(),
+        picks: scan.picks.length,
+        scannerSource: scan.source,
+        scannerModel: scan.model,
+        traderSource: trades.source,
+        traderModel: trades.model || null,
+        proposed: trades.proposed ?? 0,
+        note: trades.note || '',
+        rejected: trades.skippedList || [],
+        trades: trades.opened.map((t) => ({
+          symbol: t.symbol,
+          side: t.side,
+          allocation: t.allocation,
+          entry: t.entry,
+          stopLoss: t.stopLoss,
+          takeProfit: t.takeProfit,
+          confidence: t.confidence,
+          reason: t.reason,
+        })),
+      });
       log(`trader bot ${trades.source} → ${trades.opened.length} opened (${lap()})`);
       runState.stage = 'done';
     } catch (err) {
