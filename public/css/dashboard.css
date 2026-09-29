@@ -13,14 +13,18 @@
   --red: #ef4444;
   --red-soft: rgba(239, 68, 68, 0.15);
   --orange: #f97316;
-  --orange-btn: #ea580c;
+  --orange-btn: #c2410c; /* white text 5.2:1 */
+  --ctrl-border: #6b7280; /* control outlines, >=3:1 vs panels (WCAG 1.4.11) */
+  --green-text: #4ade80;
+  --red-text: #f87171;
   --blue: #3b82f6;
   --purple: #8b5cf6;
   --yellow: #eab308;
   --cyan: #22d3ee;
   --radius: 10px;
-  --font: "IBM Plex Sans", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Web font is loaded non-blocking; these stacks are the real fallback and must look fine on their own. */
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 * {
@@ -1072,3 +1076,41 @@ th[aria-sort="ascending"] .th-btn, th[aria-sort="descending"] .th-btn { color: v
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
 }
 .scroll-y.short { max-height: 260px; }
+
+/* ===== Round 2: contrast (AA), nav wrapping, a11y helpers ===== */
+.pill-long, .pill-hit { color: var(--green-text); }
+.pill-short, .pill-miss { color: var(--red-text); }
+.btn-stop { border-color: var(--ctrl-border); }
+.btn-ghost, .btn-close, .btn-danger, .signout, .chart-toolbar button, .ind-toggle { border-color: var(--ctrl-border); }
+.btn-danger { border-color: rgba(248, 113, 113, 0.75); }
+.settings-form input, .settings-form select, .modal-field input { border-color: var(--ctrl-border); }
+.ind-toggle[aria-pressed="true"], .chart-toolbar button.active { border-color: #9ca3af; }
+.btn-ghost:hover, .btn-stop:hover { border-color: #9ca3af; }
+
+/* nav: wrap instead of clipping / scrolling */
+@media (max-width: 1100px) {
+  .nav-links { flex-wrap: wrap; overflow: visible; gap: 4px; }
+  .nav-links a { padding: 8px 10px; min-height: 32px; display: inline-flex; align-items: center; border: 1px solid transparent; }
+  .nav-links a.active { border-color: var(--ctrl-border); }
+  .topnav-left { align-items: flex-start; }
+  .brand { padding: 8px 0; }
+}
+@media (max-width: 420px) {
+  .topnav { padding: 8px 10px; }
+  .nav-links a { padding: 8px 8px; font-size: 11px; letter-spacing: 0.02em; }
+  .topnav-right { gap: 8px; }
+  .badge { font-size: 9px; }
+}
+
+/* stale / expired / force-close */
+.pill-expired { background: rgba(234, 179, 8, 0.15); color: #facc15; }
+.step-note { font-size: 12px; }
+.btn-accent:disabled { background: #334155; border-color: #64748b; color: #e2e8f0; opacity: 1; }
+.run-elsewhere { font-size: 12px; color: #93c5fd; }
+.vis-hidden-table { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.chart-data { margin-top: 6px; font-size: 12px; }
+.chart-data summary { cursor: pointer; color: var(--text-muted); padding: 4px 0; }
+.chart-data table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11px; }
+.chart-data th, .chart-data td { text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--border-soft); }
+.chart-data th:first-child, .chart-data td:first-child { text-align: left; }
+.chart-data .scroll-y { max-height: 200px; }

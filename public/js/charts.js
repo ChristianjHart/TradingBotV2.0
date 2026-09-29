@@ -89,8 +89,22 @@ function fmtT(t) {
   return Number.isNaN(d.getTime()) ? String(t) : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+const escH = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function tableHtml(caption, heads, rows) {
+  return `<table><caption>${escH(caption)}</caption><thead><tr>${heads.map((h) => `<th scope="col">${escH(h)}</th>`).join('')}</tr></thead><tbody>${rows
+    .map((r) => `<tr>${r.map((v, i) => (i === 0 ? `<th scope="row">${escH(v)}</th>` : `<td>${escH(v)}</td>`)).join('')}</tr>`)
+    .join('')}</tbody></table>`;
+}
+function setTable(el, html) {
+  if (el && el.__h !== html) {
+    el.innerHTML = html;
+    el.__h = html;
+  }
+}
+const pctStr = (a, b) => (a ? `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%` : 'n/a');
+
 function tooltipBox(ctx, w, x, y, lines, padTop = 4) {
-  ctx.font = '11px IBM Plex Mono, monospace';
+  ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;
   const th = lines.length * 14 + 8;
   let bx = x + 12;
@@ -112,9 +126,11 @@ function tooltipBox(ctx, w, x, y, lines, padTop = 4) {
 }
 
 export class CandleChart {
-  constructor(canvas, { summaryEl } = {}) {
+  constructor(canvas, { summaryEl, tableEl, tableBars = 20 } = {}) {
     this.canvas = canvas;
     this.summaryEl = summaryEl;
+    this.tableEl = tableEl;
+    this.tableBars = tableBars;
     this.bars = [];
     this.ind = {};
     this.levels = [];
@@ -162,7 +178,20 @@ export class CandleChart {
     if (markers) this.markers = markers;
     if (live !== undefined) this.live = live;
     if (title !== undefined) this.title = title;
+    this._table();
     this.draw();
+  }
+
+  /** Visually hidden data table of the last N bars (screen-reader alternative to the canvas). */
+  _table() {
+    if (!this.tableEl) return;
+    const rows = this.bars.slice(-this.tableBars);
+    setTable(
+      this.tableEl,
+      rows.length
+        ? tableHtml(`${this.title || 'Price'} — last ${rows.length} bars`, ['Time', 'Open', 'High', 'Low', 'Close', 'Volume'], rows.map((b) => [fmtT(b.t), fmtP(b.o), fmtP(b.h), fmtP(b.l), fmtP(b.c), Math.round(b.v || 0).toLocaleString()]))
+        : '',
+    );
   }
 
   _move(clientX) {
@@ -187,7 +216,7 @@ export class CandleChart {
     this.vis = slice;
     if (!slice.length) {
       ctx.fillStyle = C.text;
-      ctx.font = '12px IBM Plex Sans, sans-serif';
+      ctx.font = '12px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       ctx.fillText('No price data', 12, 24);
       this._summary('No price data available.');
       return;
@@ -215,7 +244,7 @@ export class CandleChart {
     ctx.strokeStyle = C.grid;
     ctx.lineWidth = 1;
     ctx.fillStyle = C.text;
-    ctx.font = '10px IBM Plex Mono, monospace';
+    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
     for (let i = 0; i < 4; i++) {
       const y = padT + (plotH / 3) * i;
       ctx.beginPath();
@@ -267,7 +296,7 @@ export class CandleChart {
     }
 
     // level lines (target / entry / stop)
-    ctx.font = '10px IBM Plex Sans, sans-serif';
+    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     this.levels.forEach((l) => {
       if (!Number.isFinite(l.price)) return;
       const y = yAt(l.price);
@@ -310,7 +339,7 @@ export class CandleChart {
       ctx.lineTo(x + 6, y - dir * 11);
       ctx.closePath();
       ctx.fill();
-      ctx.font = '700 10px IBM Plex Sans, sans-serif';
+      ctx.font = '700 10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       const lw = ctx.measureText(m.label).width;
       ctx.fillText(m.label, x + 8 + lw > w - padR ? x - 8 - lw : x + 8, y - dir * 8);
     });
@@ -332,7 +361,7 @@ export class CandleChart {
     }
     ctx.fillStyle = this.live != null ? C.live : lp >= last.o ? C.up : C.down;
     const label = fmtP(lp);
-    ctx.font = '11px IBM Plex Sans, sans-serif';
+    ctx.font = '11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     ctx.fillRect(w - padR + 2, py - 9, ctx.measureText(label).width + 10, 18);
     ctx.fillStyle = C.ink;
     ctx.fillText(label, w - padR + 7, py + 4);
@@ -343,7 +372,7 @@ export class CandleChart {
     if (ind.ema21) legend.push(['EMA 21', '#3b82f6']);
     if (ind.vwap) legend.push(['VWAP', '#a855f7']);
     let lx = padL;
-    ctx.font = '10px IBM Plex Sans, sans-serif';
+    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     legend.forEach(([name, color]) => {
       ctx.fillStyle = color;
       ctx.fillRect(lx, h - 12, 8, 8);
@@ -372,8 +401,18 @@ export class CandleChart {
     const first = slice[0];
     const hi = Math.max(...slice.map((b) => b.h));
     const lo = Math.min(...slice.map((b) => b.l));
-    const lv = this.levels.map((l) => `${l.label} ${fmtP(l.price)}`).join(', ');
-    this._summary(`${this.title ? `${this.title} candlestick chart. ` : 'Candlestick chart. '}${slice.length} bars from ${fmtT(first.t)} to ${fmtT(last.t)}. Range ${fmtP(lo)} to ${fmtP(hi)}, last price ${fmtP(lp)}${lv ? `. Levels: ${lv}` : ''}. Use left and right arrow keys to inspect bars.`);
+    const e9 = ema(closes, 9);
+    const e21 = ema(closes, 21);
+    const n9 = e9[e9.length - 1];
+    const n21 = e21[e21.length - 1];
+    const move = (last.c - first.c) / (first.c || 1);
+    const trend = Math.abs(move) < 0.003 ? 'sideways' : move > 0 ? 'uptrend' : 'downtrend';
+    const emaNote = n9 != null && n21 != null ? `, EMA 9 ${n9 >= n21 ? 'above' : 'below'} EMA 21` : '';
+    const named = (label) => this.levels.find((l) => l.label === label);
+    const lvl = ['ENTRY', 'STOP', 'TARGET'].map((k) => (named(k) && Number.isFinite(named(k).price) ? `${k.toLowerCase()} ${fmtP(named(k).price)}` : null)).filter(Boolean);
+    this._summary(
+      `${this.title ? `${this.title} candlestick chart` : 'Candlestick chart'}. Last price ${fmtP(lp)}. Trend: ${trend}, ${pctStr(first.c, last.c)} over ${slice.length} bars${emaNote}.${lvl.length ? ` Levels: ${lvl.join(', ')}.` : ''} Range ${fmtP(lo)} to ${fmtP(hi)}, ${fmtT(first.t)} to ${fmtT(last.t)}. Use left and right arrow keys to inspect bars.`,
+    );
   }
 
   _summary(text) {
@@ -383,9 +422,14 @@ export class CandleChart {
 }
 
 export class LineChart {
-  constructor(canvas, { summaryEl, format = (v) => v.toFixed(2), color = '#22c55e', title = 'Line chart' } = {}) {
+  constructor(canvas, { summaryEl, tableEl, format = (v) => v.toFixed(2), color = '#22c55e', title = 'Line chart', yLabel = '', minRangePct = 0.5, tableRows = 60 } = {}) {
     this.canvas = canvas;
     this.summaryEl = summaryEl;
+    this.tableEl = tableEl;
+    this.yLabel = yLabel;
+    this.minRangePct = minRangePct;
+    this.tableRows = tableRows;
+    this.baseline = null;
     this.format = format;
     this.color = color;
     this.title = title;
@@ -416,14 +460,20 @@ export class LineChart {
   destroy() {
     this.ro.disconnect();
   }
-  set(points) {
+  /** points: [{t, v}]. opts.baseline: reference value (e.g. starting equity) that is always inside the y-range and drawn as a dashed line. */
+  set(points, opts = {}) {
     this.points = points || [];
+    this.baseline = Number.isFinite(opts.baseline) ? opts.baseline : null;
+    if (this.tableEl) {
+      const rows = this.points.slice(-this.tableRows);
+      setTable(this.tableEl, rows.length ? tableHtml(`${this.title} — last ${rows.length} of ${this.points.length} points`, ['Time', 'Value'], rows.map((p) => [p.t ? fmtT(p.t) : '', this.format(p.v)])) : '');
+    }
     this.draw();
   }
   _move(cx) {
     if (this.points.length < 2) return;
     const r = this.canvas.getBoundingClientRect();
-    const i = Math.round(((cx - r.left - 8) / (r.width - 16)) * (this.points.length - 1));
+    const i = Math.round(((cx - r.left - 8) / (r.width - 8 - 62)) * (this.points.length - 1));
     const c = Math.min(this.points.length - 1, Math.max(0, i));
     if (c !== this.hover) {
       this.hover = c;
@@ -437,41 +487,80 @@ export class LineChart {
     const pts = this.points;
     if (pts.length < 2) {
       ctx.fillStyle = C.text;
-      ctx.font = '12px IBM Plex Sans, sans-serif';
+      ctx.font = '12px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       ctx.fillText('Not enough data yet', 8, 22);
       this._summary(`${this.title}: not enough data yet.`);
       return;
     }
     const padL = 8;
-    const padR = 54;
-    const padT = 8;
-    const padB = 8;
+    const padR = 62;
+    const padT = 18;
+    const padB = 22;
     const vals = pts.map((p) => p.v);
     let min = Math.min(...vals);
     let max = Math.max(...vals);
-    const pd = (max - min) * 0.1 || 1;
+    if (this.baseline != null) {
+      min = Math.min(min, this.baseline);
+      max = Math.max(max, this.baseline);
+    }
+    // never zoom into noise: keep at least +/- minRangePct of the reference level visible
+    const ref = this.baseline ?? (vals[0] || 1);
+    const half = Math.abs(ref) * (this.minRangePct / 100);
+    const mid = (min + max) / 2;
+    if (max - min < half * 2) {
+      min = mid - half;
+      max = mid + half;
+    }
+    const pd = (max - min) * 0.08;
     min -= pd;
     max += pd;
     const x = (i) => padL + (i / (pts.length - 1)) * (w - padL - padR);
     const y = (v) => padT + ((max - v) / (max - min)) * (h - padT - padB);
     ctx.strokeStyle = C.grid;
     ctx.fillStyle = C.text;
-    ctx.font = '10px IBM Plex Mono, monospace';
-    for (let i = 0; i < 3; i++) {
-      const gy = padT + ((h - padT - padB) / 2) * i;
+    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const gy = padT + ((h - padT - padB) / ticks) * i;
       ctx.beginPath();
       ctx.moveTo(padL, gy);
       ctx.lineTo(w - padR, gy);
       ctx.stroke();
-      ctx.fillText(this.format(max - ((max - min) / 2) * i), w - padR + 4, gy + 3);
+      ctx.fillText(this.format(max - ((max - min) / ticks) * i), w - padR + 4, gy + 3);
     }
-    const g = ctx.createLinearGradient(0, 0, 0, h);
+    if (this.yLabel) ctx.fillText(this.yLabel, padL, 11);
+    // x-axis ticks: first / middle / last timestamp
+    const tickIdx = [0, Math.floor((pts.length - 1) / 2), pts.length - 1];
+    tickIdx.forEach((ti, k) => {
+      const p = pts[ti];
+      if (!p?.t) return;
+      const d = new Date(p.t);
+      const txt = Number.isNaN(d.getTime()) ? String(p.t) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const tw = ctx.measureText(txt).width;
+      const tx = k === 0 ? padL : k === 2 ? w - padR - tw : x(ti) - tw / 2;
+      ctx.fillText(txt, tx, h - 6);
+    });
+    if (this.baseline != null) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL, y(this.baseline));
+      ctx.lineTo(w - padR, y(this.baseline));
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#facc15';
+      ctx.fillText('start', w - padR + 4, y(this.baseline) - 4);
+      ctx.fillStyle = C.text;
+    }
+    const g = ctx.createLinearGradient(0, padT, 0, h - padB);
     g.addColorStop(0, `${this.color}55`);
     g.addColorStop(1, `${this.color}00`);
     ctx.beginPath();
     pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.v)) : ctx.moveTo(x(i), y(p.v))));
-    ctx.lineTo(x(pts.length - 1), h);
-    ctx.lineTo(x(0), h);
+    ctx.lineTo(x(pts.length - 1), h - padB);
+    ctx.lineTo(x(0), h - padB);
     ctx.closePath();
     ctx.fillStyle = g;
     ctx.fill();
@@ -490,7 +579,7 @@ export class LineChart {
     }
     const first = pts[0];
     const last = pts[pts.length - 1];
-    this._summary(`${this.title}: ${pts.length} points, from ${this.format(first.v)} to ${this.format(last.v)}, low ${this.format(Math.min(...vals))}, high ${this.format(Math.max(...vals))}.`);
+    this._summary(`${this.title}${this.yLabel ? ` (${this.yLabel})` : ''}: ${pts.length} points, from ${this.format(first.v)} to ${this.format(last.v)} (${pctStr(first.v, last.v)}), low ${this.format(Math.min(...vals))}, high ${this.format(Math.max(...vals))}${this.baseline != null ? `, starting level ${this.format(this.baseline)}` : ''}.`);
   }
   _summary(text) {
     this.canvas.setAttribute('aria-label', text);

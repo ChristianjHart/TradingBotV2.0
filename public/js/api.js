@@ -50,7 +50,10 @@ export async function api(path, options = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(err.error || res.statusText || `HTTP ${res.status}`, res.status);
+    const apiErr = new ApiError(err.error || res.statusText || `HTTP ${res.status}`, res.status);
+    apiErr.data = err;
+    apiErr.stale = err.stale === true;
+    throw apiErr;
   }
   return res.json();
 }
