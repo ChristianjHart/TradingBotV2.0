@@ -48,13 +48,16 @@ export function getAccount(livePrices = {}) {
   const realized = closed.reduce((s, p) => s + (p.pnl || 0), 0);
   const allocated = open.reduce((s, p) => s + p.allocation, 0);
   const unrealized = open.reduce((s, p) => s + openNet(p, livePrices[p.symbol] ?? p.entry), 0);
+  const openFees = open.reduce((s, p) => s + (p.fees || 0), 0);
   const base = config.paperEquity + realized;
   return {
     startingEquity: config.paperEquity,
     realizedPnl: +realized.toFixed(2),
     unrealizedPnl: +unrealized.toFixed(2),
     equity: +(base + unrealized).toFixed(2),
-    cash: +(base - allocated).toFixed(2),
+    // Entry fees on open positions are paid out of cash; equity = cash + allocated + gross unrealized,
+    // so each fee is deducted exactly once (open: in cash and in net unrealized; closed: in realized pnl).
+    cash: +(base - allocated - openFees).toFixed(2),
     allocated: +allocated.toFixed(2),
     openCount: open.length,
     closedCount: closed.length,
@@ -104,7 +107,7 @@ export function openPosition(t) {
     ...t,
   };
   positions.unshift(pos);
-  store.setPositions(positions.slice(0, 1000));
+  store.setPositions(positions);
   syncRow(pos);
   recordEquity();
 }
@@ -128,69 +131,134 @@ function closeIn(p, rawPrice, reason, { market = true } = {}) {
   });
 }
 
+export class PositionError extends Error {
+  constructor(status, message, code) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** Fresh, non-stale-checked quote for closing. Throws PositionError 502 (no quote) / 409 (stale, unless force). */
+async function closingQuote(p, force) {
+  const q = await alpaca.getQuote(p.symbol).catch(() => null);
+  if (!q || !Number.isFinite(q.price)) throw new PositionError(502, `no quote available for ${p.symbol}; position left open`, 'no_quote');
+  if (q.stale && !force) {
+    throw new PositionError(409, `quote for ${p.symbol} is stale (market closed or old data); retry with force=1 to close at the last price`, 'stale_quote');
+  }
+  return q;
+}
+
+/**
+ * Concurrency model: network I/O happens on a snapshot, but every write re-reads the store and merges
+ * by id in one synchronous section (no await between read and write), so concurrent openPosition /
+ * manual close / monitor cycles never overwrite each other. Concurrent monitor cycles are coalesced.
+ */
+let monitorInFlight = null;
+
+export function monitorPositions() {
+  monitorInFlight ||= runMonitor().finally(() => {
+    monitorInFlight = null;
+  });
+  return monitorInFlight;
+}
+
 /**
  * Apply stop-loss / take-profit / trailing / time-exit rules to every open position.
  * Stock positions are skipped while their data is stale (market closed): no stop decisions on old prices.
+ * Expired positions are flagged (expiredAt) immediately, but only time-exit on a fresh bar.
  */
-export async function monitorPositions() {
-  const positions = store.getPositions();
+async function runMonitor() {
   const settings = store.getSettings();
-  let changed = false;
+  const decisions = new Map(); // id -> patch
   const prices = {};
-  for (const p of positions) {
-    if (p.status !== 'open') continue;
+  const snapshot = store.getPositions().filter((p) => p.status === 'open');
+  for (const p of snapshot) {
     try {
       const bars = await alpaca.getBars(p.symbol, { limit: 120 });
       if (bars.length) prices[p.symbol] = bars[bars.length - 1].c;
-      if (alpaca.isStale(p.symbol)) continue;
-      if (!p.expiresAt) {
-        p.expiresAt = expiryFor(p.openedAt, settings.horizonHours);
-        changed = true;
-      }
-      const r = simulateExit(p, bars, { breakEven: settings.breakEven, trailR: settings.trailR });
-      if (r.stopLoss !== p.stopLoss || r.trailing !== p.trailing) {
+      const stale = alpaca.isStale(p.symbol);
+      const r = simulateExit(p, bars, { breakEven: settings.breakEven, trailR: settings.trailR, fresh: !stale });
+      const patch = { expired: r.expired, expiresAt: r.expiresAt };
+      if (!stale) Object.assign(patch, { stopLoss: r.stopLoss, trailing: r.trailing, exit: r.exit, checkedAt: new Date().toISOString() });
+      decisions.set(p.id, patch);
+    } catch (err) {
+      store.addLog({ level: 'warn', message: `monitor ${p.symbol}: ${err.message} (retrying next cycle)` });
+    }
+  }
+  // Synchronous merge onto the latest store contents.
+  const positions = store.getPositions();
+  let changed = false;
+  for (const p of positions) {
+    const d = p.status === 'open' && decisions.get(p.id);
+    if (!d) continue;
+    if (!p.expiresAt) {
+      p.expiresAt = d.expiresAt;
+      changed = true;
+    }
+    if (d.expired && !p.expiredAt) {
+      p.expiredAt = p.expiresAt;
+      changed = true;
+    }
+    if (d.checkedAt) {
+      p.lastCheckedAt = d.checkedAt;
+      if (d.stopLoss !== p.stopLoss || d.trailing !== p.trailing) {
         p.initialStop ??= p.stopLoss;
-        p.stopLoss = +r.stopLoss.toFixed(4);
-        p.trailing = r.trailing;
+        p.stopLoss = +d.stopLoss.toFixed(4);
+        p.trailing = d.trailing;
         changed = true;
-        if (!r.exit) syncRow(p);
+        if (!d.exit) syncRow(p);
       }
-      if (r.exit) {
-        closeIn(p, r.exit.price, r.exit.reason, { market: r.exit.market });
+      if (d.exit) {
+        closeIn(p, d.exit.price, d.exit.reason, { market: d.exit.market });
         changed = true;
       }
-    } catch {
-      /* try again next cycle */
     }
   }
   if (changed) store.setPositions(positions);
   recordEquity(prices);
 }
 
-export async function closeManually(id) {
+/** Close one open position at a live quote. Throws PositionError (404 unknown, 409 stale, 502 no quote). */
+export async function closeManually(id, { force = false } = {}) {
+  const snap = store.getPositions().find((x) => x.id === id && x.status === 'open');
+  if (!snap) throw new PositionError(404, 'open position not found', 'not_found');
+  const q = await closingQuote(snap, force);
   const positions = store.getPositions();
   const p = positions.find((x) => x.id === id && x.status === 'open');
-  if (!p) return null;
-  const q = await alpaca.getQuote(p.symbol);
-  closeIn(p, q?.price ?? p.entry, 'manual');
+  if (!p) throw new PositionError(404, 'position was already closed', 'not_found');
+  closeIn(p, q.price, 'manual');
+  if (q.stale) p.staleExit = true;
   store.setPositions(positions);
   recordEquity();
   return p;
 }
 
-export async function closeAll() {
+/** Close every open position. Returns { closed, failed:[{id,symbol,status,code,error}] }; failures leave positions open. */
+export async function closeAll({ force = false } = {}) {
+  const quotes = new Map();
+  const failed = [];
+  for (const p of store.getPositions().filter((x) => x.status === 'open')) {
+    try {
+      quotes.set(p.id, await closingQuote(p, force));
+    } catch (err) {
+      failed.push({ id: p.id, symbol: p.symbol, status: err.status || 502, code: err.code || 'error', error: err.message });
+    }
+  }
   const positions = store.getPositions();
   let closed = 0;
-  for (const p of positions.filter((x) => x.status === 'open')) {
-    const q = await alpaca.getQuote(p.symbol).catch(() => null);
-    closeIn(p, q?.price ?? p.entry, 'manual');
+  for (const p of positions) {
+    const q = p.status === 'open' && quotes.get(p.id);
+    if (!q) continue;
+    closeIn(p, q.price, 'manual');
+    if (q.stale) p.staleExit = true;
     closed += 1;
   }
   if (closed) {
     store.setPositions(positions);
     recordEquity();
   }
-  return closed;
+  return { closed, failed };
 }
 
 export async function listPositions() {
@@ -202,7 +270,8 @@ export async function listPositions() {
     open: open.map((p) => {
       const price = prices[p.symbol] ?? p.entry;
       const pnl = openNet(p, price);
-      return { ...p, price, pnl, pnlPct: +((pnl / p.allocation) * 100).toFixed(2), stale: alpaca.isStale(p.symbol) };
+      const expired = Boolean(p.expiredAt) || (p.expiresAt ? Date.now() >= new Date(p.expiresAt).getTime() : false);
+      return { ...p, price, pnl, pnlPct: +((pnl / p.allocation) * 100).toFixed(2), stale: alpaca.isStale(p.symbol), expired };
     }),
     closed: all.filter((p) => p.status === 'closed').slice(0, 30),
   };

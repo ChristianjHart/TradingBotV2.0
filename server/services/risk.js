@@ -1,5 +1,5 @@
 import { groupOf } from './universe.js';
-import { assetClassOf } from './market.js';
+import { assetClassOf, etDayStart } from './market.js';
 
 /** Turn settings (percent values) into fractional limits. */
 export function limitsFrom(s) {
@@ -11,8 +11,11 @@ export function limitsFrom(s) {
   };
 }
 
-/** Realized P&L of positions closed since `since` plus current unrealized P&L. */
-export function dailyPnl(positions, unrealized = 0, since = new Date().setUTCHours(0, 0, 0, 0)) {
+/**
+ * Realized P&L of positions closed since `since` plus current unrealized P&L.
+ * The trading day is the US/Eastern calendar day (midnight America/New_York), not UTC midnight.
+ */
+export function dailyPnl(positions, unrealized = 0, since = etDayStart()) {
   const realized = positions
     .filter((p) => p.status === 'closed' && new Date(p.closedAt).getTime() >= since)
     .reduce((s, p) => s + (p.pnl || 0), 0);

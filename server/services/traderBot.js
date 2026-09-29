@@ -5,6 +5,7 @@ import { getAccount, openPosition, livePrices } from './positions.js';
 import { applySlippage, feeFor } from './fills.js';
 import { limitsFrom, dailyPnl, isHalted, checkEntry } from './risk.js';
 import { isCrypto } from './market.js';
+import { alpaca } from './alpaca.js';
 
 const MAX_POSITION_PCT = 0.2; // of equity, per trade
 const MAX_RISK_PCT = 0.02; // of equity lost if the stop is hit
@@ -95,6 +96,7 @@ export async function runTraderBot(picks, { regime } = {}) {
   let cash = account.cash;
   const opened = [];
   const skipped = [];
+  const adjusted = [];
   for (const t of proposed) {
     if (opened.length >= slots) break;
     const c = byCand.get(t.symbol);
@@ -110,24 +112,45 @@ export async function runTraderBot(picks, { regime } = {}) {
       skipped.push(`${t.symbol} (crypto cannot be shorted)`);
       continue;
     }
-    const quoted = c.price;
+    // The scanner's price can be minutes old: refetch, and refuse to open on stale/unavailable data.
+    let q = null;
+    try {
+      q = await alpaca.getQuote(t.symbol);
+    } catch {
+      /* treated as unavailable */
+    }
+    if (!q || !Number.isFinite(q.price) || q.stale) {
+      skipped.push(`${t.symbol} (stale quote${q && q.stale ? ': market closed or old data' : ': unavailable'})`);
+      continue;
+    }
+    const quoted = q.price;
     const entry = applySlippage(quoted, t.side, 'entry', settings.slippageBps);
     let stop = Number(t.stopLoss);
     let target = Number(t.takeProfit);
     const long = t.side === 'long';
     const atrAbs = entry * ((c.atrPct || 1.5) / 100);
     // Repair missing / wrong-side levels instead of trusting the model blindly.
-    if (!Number.isFinite(stop) || (long ? stop >= entry : stop <= entry)) stop = entry + (long ? -2 : 2) * atrAbs;
-    if (!Number.isFinite(target) || (long ? target <= entry : target >= entry)) target = entry + (long ? 3.5 : -3.5) * atrAbs;
+    const proposedStop = t.stopLoss;
+    if (!Number.isFinite(stop) || (long ? stop >= entry : stop <= entry)) {
+      stop = entry + (long ? -2 : 2) * atrAbs;
+      adjusted.push(`${t.symbol}: stop ${proposedStop ?? 'missing'} on wrong side/invalid -> 2 ATR (${stop.toFixed(4)})`);
+    }
+    if (!Number.isFinite(target) || (long ? target <= entry : target >= entry)) {
+      target = entry + (long ? 3.5 : -3.5) * atrAbs;
+      adjusted.push(`${t.symbol}: target ${t.takeProfit ?? 'missing'} invalid -> 3.5 ATR (${target.toFixed(4)})`);
+    }
     const stopDist = Math.abs(entry - stop) / entry;
     if (stopDist < 0.003 || stopDist > 0.15) {
+      const before = stop;
       stop = entry + (long ? -2 : 2) * atrAbs;
+      adjusted.push(`${t.symbol}: stop ${before.toFixed(4)} out of range (${(stopDist * 100).toFixed(2)}% from entry) -> 2 ATR (${stop.toFixed(4)})`);
     }
     const riskDist = Math.abs(entry - stop) / entry;
 
     let alloc = Number(t.allocationUsd);
     if (!Number.isFinite(alloc)) alloc = Infinity;
-    alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / riskDist, cash);
+    // Leave room in cash for the entry fee (paid on top of the allocation).
+    alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / riskDist, cash / (1 + settings.feeBps / 10_000));
     const gate = checkEntry({ open: [...open, ...opened], equity: account.equity, symbol: t.symbol, alloc, limits });
     if (!gate.ok) {
       skipped.push(`${t.symbol} (${gate.reason})`);
@@ -139,7 +162,8 @@ export async function runTraderBot(picks, { regime } = {}) {
       continue;
     }
 
-    cash -= alloc;
+    const fee = feeFor(alloc, settings.feeBps);
+    cash -= alloc + fee;
     const pos = {
       symbol: t.symbol,
       side: t.side,
@@ -148,7 +172,7 @@ export async function runTraderBot(picks, { regime } = {}) {
       takeProfit: +target.toFixed(4),
       allocation: +alloc.toFixed(2),
       qty: +(alloc / entry).toFixed(6),
-      fees: feeFor(alloc, settings.feeBps),
+      fees: fee, // entry fee; the exit fee is added on close and both land in realized P&L once
       slippage: +(Math.abs(entry - quoted) * (alloc / entry)).toFixed(2),
       confidence: c.confidence,
       reason: String(t.reason || c.reason).slice(0, 300),
@@ -158,9 +182,13 @@ export async function runTraderBot(picks, { regime } = {}) {
     openPosition(pos);
     opened.push(pos);
   }
+  if (adjusted.length) {
+    note = `${note}${note ? ' ' : ''}[levels replaced: ${adjusted.join('; ')}]`.slice(0, 1500);
+    store.addLog({ level: 'info', message: `trader bot replaced levels: ${adjusted.join('; ')}` });
+  }
   store.addLog({
     level: 'info',
     message: `trader bot (${source}): model proposed ${proposed.length} of ${cands.length} candidates, opened ${opened.length} (slots ${slots})${skipped.length ? `; rejected: ${skipped.join(', ')}` : ''}`,
   });
-  return { source, model, opened, skippedList: skipped, proposed: proposed.length, note };
+  return { source, model, opened, skippedList: skipped, adjustedList: adjusted, proposed: proposed.length, note };
 }

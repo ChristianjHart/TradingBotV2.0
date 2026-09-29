@@ -12,8 +12,35 @@ export function requireAdmin(req, res, next) {
   res.status(401).json({ error: 'unauthorized' });
 }
 
-/** Tiny fixed-window in-memory rate limiter, keyed by client IP. */
-export function rateLimit({ windowMs, max, name = 'rate' }) {
+/**
+ * Client key for rate limiting. Behind a reverse proxy (Render, nginx) req.ip is the proxy for every
+ * visitor unless TRUST_PROXY=true; with it we use the address the trusted proxy appended to
+ * X-Forwarded-For (the LAST entry; earlier entries are client-supplied and spoofable).
+ */
+export function clientKey(req) {
+  if (config.trustProxy) {
+    const xff = req.get?.('x-forwarded-for');
+    const last = xff && xff.split(',').map((s) => s.trim()).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return req.ip || 'unknown';
+}
+
+/** Warn when running behind Render / in production without TRUST_PROXY: all users would share one bucket. */
+export function warnIfProxyMisconfigured(log = () => {}) {
+  if (config.trustProxy) return false;
+  if (!(process.env.RENDER || config.nodeEnv === 'production')) return false;
+  const msg = 'TRUST_PROXY is not set: behind a proxy every client shares one rate-limit bucket (set TRUST_PROXY=true on Render)';
+  console.warn(`[security] ${msg}`);
+  log(msg);
+  return true;
+}
+
+/**
+ * Tiny fixed-window in-memory rate limiter, keyed by client IP.
+ * `refundWhen(res)` (optional) gives the hit back once the response is sent, e.g. for no-op 200s.
+ */
+export function rateLimit({ windowMs, max, name = 'rate', refundWhen }) {
   const hits = new Map();
   setInterval(() => {
     const now = Date.now();
@@ -21,13 +48,14 @@ export function rateLimit({ windowMs, max, name = 'rate' }) {
   }, windowMs).unref();
   return (req, res, next) => {
     const now = Date.now();
-    const key = req.ip || 'unknown';
+    const key = clientKey(req);
     let h = hits.get(key);
     if (!h || h.reset <= now) hits.set(key, (h = { n: 0, reset: now + windowMs }));
     if (++h.n > max) {
       res.set('Retry-After', String(Math.ceil((h.reset - now) / 1000)));
       return res.status(429).json({ error: `too many requests (${name})` });
     }
+    if (refundWhen) res.on('finish', () => refundWhen(res) && h.n > 0 && h.n--);
     next();
   };
 }

@@ -31,7 +31,7 @@ test('account math and closing everything realises fees', async () => {
   await monitorPositions();
   const before = getAccount();
   assert.equal(before.openCount, 2);
-  assert.equal(await closeAll(), 2);
+  assert.equal((await closeAll()).closed, 2);
   const after = getAccount();
   assert.equal(after.openCount, 0);
   assert.ok(after.realizedPnl < 0); // slippage + fees on flat prices

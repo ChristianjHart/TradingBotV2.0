@@ -89,24 +89,3 @@ export function pickStats(records, openCount = 0) {
     source: 'scanner-picks',
   };
 }
-
-/** Old "prediction" shape for endpoints/pages that still read it. */
-export function toLegacyPrediction(r) {
-  return {
-    id: r.id,
-    symbol: r.symbol,
-    assetClass: assetClassOf(r.symbol),
-    direction: r.direction,
-    confidence: r.confidence,
-    entryPrice: r.price,
-    createdAt: r.at,
-    resolveAt: r.dueAt,
-    status: r.scored ? 'resolved' : 'open',
-    outcome: r.scored ? (r.hit ? 'hit' : 'miss') : null,
-    correct: r.scored ? r.hit : null,
-    actualPrice: r.priceThen ?? null,
-    actualMovePct: r.movePct ?? null,
-    resolvedAt: r.scoredAt ?? null,
-    reasons: r.reason ? [r.reason] : [],
-  };
-}

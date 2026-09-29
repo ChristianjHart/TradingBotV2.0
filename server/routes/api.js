@@ -4,22 +4,30 @@ import { alpaca } from '../services/alpaca.js';
 import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
 import { supabaseEnabled } from '../db/supabase.js';
 import { startAiRun, runState } from '../services/aiRun.js';
-import { scorePicks } from '../services/pickScoring.js';
 import { listPositions, closeManually, closeAll } from '../services/positions.js';
 import { computePerformance } from '../services/performance.js';
-import { pickStats, toLegacyPrediction } from '../services/picks.js';
+import { pickStats } from '../services/picks.js';
 import { usMarketOpen } from '../services/market.js';
 import { requireAdmin, rateLimit, validateSettings, validSymbol } from '../middleware.js';
 
 const router = Router();
 
-// Generous global cap for the whole API, tight one for the credit-spending run trigger.
-router.use(rateLimit({ windowMs: 60_000, max: 300, name: 'api' }));
-const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run' });
+// Dashboard polling (GET, not market data) has its own generous bucket; everything else shares a tighter one.
+// The credit-spending run trigger is tighter still and is not charged for 200 "already running" replies.
+const pollLimit = rateLimit({ windowMs: 60_000, max: 1200, name: 'poll' });
+const apiLimit = rateLimit({ windowMs: 60_000, max: 300, name: 'api' });
+router.use((req, res, next) => (req.method === 'GET' && !req.path.startsWith('/market') ? pollLimit : apiLimit)(req, res, next));
+const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run', refundWhen: (res) => res.statusCode === 200 });
+
+/** JSON error with the error's own HTTP status when it has one, else `fallback`. */
+function sendError(res, err, fallback = 500) {
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : fallback;
+  res.status(status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+}
+const wantsForce = (req) => /^(1|true)$/i.test(String(req.query.force ?? req.body?.force ?? ''));
 
 const accuracy = () => pickStats(store.getPickScores(), openPickCount());
 const openPickCount = () => store.getPickScores().filter((r) => !r.scored).length;
-const legacyPicks = () => store.getPickScores().map(toLegacyPrediction);
 
 router.get('/health', (_req, res) => {
   res.json({
@@ -67,22 +75,30 @@ router.get('/positions', async (_req, res) => {
   try {
     res.json(await listPositions());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
-router.post('/positions/close-all', requireAdmin, async (_req, res) => {
+// Body/query `force` closes at the last (stale) price. Errors: 409 stale quote, 502 no quote (nothing closed).
+router.post('/positions/close-all', requireAdmin, async (req, res) => {
   try {
-    res.json({ closed: await closeAll() });
+    const r = await closeAll({ force: wantsForce(req) });
+    if (r.failed.length && !r.closed) {
+      const first = r.failed[0];
+      return res.status(r.failed.some((f) => f.status === 409) ? 409 : first.status).json({ error: first.error, code: first.code, closed: 0, failed: r.failed });
+    }
+    res.json(r);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 router.post('/positions/:id/close', requireAdmin, async (req, res) => {
-  const p = await closeManually(req.params.id).catch(() => null);
-  if (!p) return res.status(404).json({ error: 'open position not found' });
-  res.json(p);
+  try {
+    res.json(await closeManually(req.params.id, { force: wantsForce(req) }));
+  } catch (err) {
+    sendError(res, err);
+  }
 });
 
 router.get('/status', (_req, res) => {
@@ -107,65 +123,6 @@ router.get('/status', (_req, res) => {
   });
 });
 
-// --- Legacy endpoints: same shapes as before, now backed by the scanner bot's picks. ---
-
-function watchlistView() {
-  const ai = store.getAiPicks();
-  const size = store.getSettings().watchlistSize || config.watchlistSize;
-  return {
-    date: ai.updatedAt ? ai.updatedAt.slice(0, 10) : null,
-    updatedAt: ai.updatedAt,
-    symbols: (ai.picks || []).slice(0, size).map((p) => ({
-      symbol: p.symbol,
-      assetClass: p.symbol.includes('/') ? 'crypto' : 'equity',
-      direction: p.direction,
-      confidence: p.confidence,
-      price: p.price,
-      reasons: p.reason ? [p.reason] : [],
-    })),
-    scanned: ai.scanned ?? 0,
-    universe: ai.universe ?? 0,
-    mock: alpaca.usingMock(),
-  };
-}
-
-router.get('/watchlist', (_req, res) => res.json(watchlistView()));
-
-// Legacy "scan" now triggers the one real pipeline (scanner bot → trader bot).
-router.post('/scan', requireAdmin, runLimit, (_req, res) => {
-  const started = startAiRun();
-  res.status(started ? 202 : 200).json({ started, ...runState });
-});
-
-router.get('/predictions', (req, res) => {
-  let list = legacyPicks();
-  if (req.query.status) list = list.filter((p) => p.status === req.query.status);
-  res.json({ predictions: list.slice(0, 200) });
-});
-
-router.get('/predictions/open', (_req, res) => {
-  res.json({ predictions: legacyPicks().filter((p) => p.status === 'open').slice(0, 200) });
-});
-
-router.get('/accuracy', (_req, res) => res.json(accuracy()));
-
-router.post('/evaluate', requireAdmin, async (_req, res) => {
-  try {
-    const r = await scorePicks();
-    res.json({ resolved: r.scored, correct: r.hits });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/train', requireAdmin, (_req, res) => {
-  res.json({ deprecated: true, message: 'the self-training loop was retired; picks are scored and calibrated instead (see /api/performance)' });
-});
-
-router.get('/model', (_req, res) => {
-  res.json({ deprecated: true, version: null, weights: {}, trainedOn: 0, lastTrainedAt: null });
-});
-
 router.get('/logs', (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
   res.json({ logs: store.getLogs().slice(0, limit) });
@@ -177,7 +134,7 @@ router.get('/market/quote/:symbol', async (req, res) => {
   try {
     res.json(await alpaca.getQuote(symbol));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
 });
 
@@ -188,7 +145,7 @@ router.get('/market/bars/:symbol', async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
     res.json({ symbol, bars: await alpaca.getBars(symbol, { limit }) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
 });
 
@@ -201,7 +158,7 @@ router.get('/market/quotes', async (req, res) => {
   try {
     res.json({ quotes: await alpaca.getQuotes(symbols) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
 });
 
@@ -241,23 +198,12 @@ router.post('/worker/kill', requireAdmin, (_req, res) => {
   res.json(store.getWorker());
 });
 
+// Slim summary kept for the frontend's log fallback; the old prediction/watchlist/model fields are gone.
 router.get('/dashboard', (_req, res) => {
-  const recs = legacyPicks();
-  const open = recs.filter((p) => p.status === 'open');
-  const wl = watchlistView();
-  const shorts = open.filter((p) => p.direction === 'short').length;
   res.json({
-    watchlist: wl,
-    openPredictions: open.slice(0, 200),
-    recentResolved: recs.filter((p) => p.status === 'resolved').slice(0, 20),
     accuracy: accuracy(),
     worker: store.getWorker(),
-    model: { deprecated: true, version: null, weights: {}, trainedOn: 0, lastTrainedAt: null },
     logs: store.getLogs().slice(0, 40),
-    allocation: [
-      { label: 'LONG', value: open.length - shorts, color: '#22c55e' },
-      { label: 'SHORT', value: shorts, color: '#ef4444' },
-    ],
     tradingEnabled: false,
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),

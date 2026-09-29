@@ -63,7 +63,22 @@ const files = {
   runs: path.join(config.dataDir, 'runs.json'),
   equity: path.join(config.dataDir, 'equity.json'),
   pickScores: path.join(config.dataDir, 'pick-scores.json'),
+  positionsArchive: path.join(config.dataDir, 'positions-archive.json'),
 };
+
+export const MAX_POSITIONS = 1000;
+
+// Write-through cache: each file is parsed once, then served from memory. Getters hand out clones
+// so callers may mutate freely; only set*() (which also writes the file) changes the cache.
+const cache = new Map();
+function cached(key, file, fallback) {
+  if (!cache.has(key)) cache.set(key, readJson(file, fallback));
+  return structuredClone(cache.get(key));
+}
+function put(key, file, data) {
+  writeJson(file, data);
+  cache.set(key, structuredClone(data));
+}
 
 // Logs are hot: keep them in memory and write to disk at most every LOG_FLUSH_MS.
 const LOG_FLUSH_MS = 1000;
@@ -107,32 +122,32 @@ export const store = {
   },
 
   getSettings() {
-    return { ...defaults.settings, ...readJson(files.settings, defaults.settings) };
+    return { ...defaults.settings, ...cached('settings', files.settings, defaults.settings) };
   },
   setSettings(data) {
-    writeJson(files.settings, data);
+    put('settings', files.settings, data);
   },
 
   getAiPicks() {
-    return readJson(files.aiPicks, { picks: [], updatedAt: null });
+    return cached('aiPicks', files.aiPicks, { picks: [], updatedAt: null });
   },
   setAiPicks(data) {
-    writeJson(files.aiPicks, data);
+    put('aiPicks', files.aiPicks, data);
   },
 
   getRunSummary() {
-    return readJson(files.runSummary, null);
+    return cached('runSummary', files.runSummary, null);
   },
   setRunSummary(data) {
-    writeJson(files.runSummary, data);
+    put('runSummary', files.runSummary, data);
   },
 
   /** Run history, newest first (successful and failed runs). */
   getRuns() {
-    return readJson(files.runs, []);
+    return cached('runs', files.runs, []);
   },
   setRuns(data) {
-    writeJson(files.runs, data.slice(0, 200));
+    put('runs', files.runs, data.slice(0, 200));
   },
   addRun(run) {
     this.setRuns([run, ...this.getRuns()]);
@@ -140,31 +155,55 @@ export const store = {
 
   /** Equity snapshots [{t, equity}] ascending. */
   getEquity() {
-    return readJson(files.equity, []);
+    return cached('equity', files.equity, []);
   },
   setEquity(data) {
-    writeJson(files.equity, data.slice(-3000));
+    put('equity', files.equity, data.slice(-3000));
   },
 
   /** Scanner picks with their horizon outcome (see services/picks.js). */
   getPickScores() {
-    return readJson(files.pickScores, []);
+    return cached('pickScores', files.pickScores, []);
   },
   setPickScores(data) {
-    writeJson(files.pickScores, data.slice(0, 5000));
+    put('pickScores', files.pickScores, data.slice(0, 5000));
   },
 
+  /** Positions, newest first. */
   getPositions() {
-    return readJson(files.positions, []);
+    return cached('positions', files.positions, []);
   },
+  /**
+   * Keeps every open position plus the newest closed ones up to MAX_POSITIONS; older closed
+   * positions are appended to positions-archive.json instead of being dropped.
+   */
   setPositions(data) {
-    writeJson(files.positions, data);
+    let keep = data;
+    if (data.length > MAX_POSITIONS) {
+      const room = Math.max(0, MAX_POSITIONS - data.filter((p) => p.status === 'open').length);
+      let closedSeen = 0;
+      keep = [];
+      const overflow = [];
+      for (const p of data) {
+        if (p.status === 'open' || closedSeen++ < room) keep.push(p);
+        else overflow.push(p);
+      }
+      if (overflow.length) {
+        const archive = readJson(files.positionsArchive, []);
+        const seen = new Set(archive.map((p) => p.id));
+        writeJson(files.positionsArchive, [...archive, ...overflow.filter((p) => !seen.has(p.id))]);
+      }
+    }
+    put('positions', files.positions, keep);
+  },
+  getPositionsArchive() {
+    return readJson(files.positionsArchive, []);
   },
 
   getWorker() {
-    return { ...defaults.worker, ...readJson(files.worker, defaults.worker) };
+    return { ...defaults.worker, ...cached('worker', files.worker, defaults.worker) };
   },
   setWorker(data) {
-    writeJson(files.worker, data);
+    put('worker', files.worker, data);
   },
 };

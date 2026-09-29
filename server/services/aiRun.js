@@ -83,6 +83,7 @@ export function startAiRun() {
         proposed: trades.proposed ?? 0,
         note: trades.note || '',
         rejected: trades.skippedList || [],
+        adjusted: trades.adjustedList || [],
         trades: trades.opened.map((t) => ({
           symbol: t.symbol,
           side: t.side,
