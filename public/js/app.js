@@ -239,6 +239,7 @@ function renderDashboard() {
 
 function runButtonLabel() {
   const stage = state.runStage;
+  if (stage === 'fetching') return 'FETCHING DATA…';
   if (stage === 'scanning') return 'SCANNER BOT…';
   if (stage === 'trading') return 'TRADER BOT…';
   return 'RUN';
@@ -291,7 +292,7 @@ function aiSectionHtml() {
     : run.stage === 'done'
       ? `Last run: ${run.picks} picks · ${run.opened} position(s) opened`
       : run.running
-        ? `Running: ${run.stage}…`
+        ? `Running: ${{ fetching: 'fetching market data', scanning: 'scanner bot (AI can take 1–3 min)', trading: 'trader bot' }[run.stage] || run.stage}…`
         : 'No run since the server started';
   const flags = `OpenRouter key: ${st.openrouterConfigured ? 'yes' : '<span class="neg">MISSING</span>'} · Supabase: ${st.supabaseConfigured ? 'yes' : 'no'} · Data: ${escapeHtml(st.dataMode || '?')}`;
 

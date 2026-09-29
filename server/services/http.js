@@ -23,7 +23,8 @@ export async function loggedFetch(service, url, options = {}) {
     url: String(url).split('?')[0] + (String(url).includes('?') ? '?…' : ''),
   };
   try {
-    const res = await fetch(url, options);
+    // Never let one hung upstream request stall a whole scan.
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000), ...options });
     insert('api_logs', { ...row, status: res.status, duration_ms: Date.now() - started });
     return res;
   } catch (err) {
