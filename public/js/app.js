@@ -11,6 +11,7 @@ const state = {
   bars: [],
   tvWidget: null,
   picks: null,
+  summary: null,
   positions: null,
   selectedPos: null,
   runStage: null,
@@ -49,59 +50,88 @@ function donutGradient(parts) {
   return `conic-gradient(${stops.join(', ')})`;
 }
 
+function summaryHtml() {
+  const sm = state.summary;
+  const picksN = state.picks?.picks?.length || 0;
+  if (!sm || !sm.at) {
+    return `<div class="empty">Press RUN — the scanner bot ranks the top picks, then the trader bot decides which to simulate.</div>`;
+  }
+  const n = sm.trades?.length || 0;
+  const who = sm.traderSource === 'ai' ? 'AI' : 'Rule-based bot';
+  const head = n
+    ? `${who} simulated ${n} trade${n === 1 ? '' : 's'} from a top ${sm.picks || picksN}`
+    : `${who} simulated no trades from a top ${sm.picks || picksN}`;
+  return `
+    <div class="sum-head">${escapeHtml(head)}</div>
+    <div class="dim sum-when">${new Date(sm.at).toLocaleString()} · scanner ${escapeHtml(sm.scannerModel || sm.scannerSource)} · trader ${escapeHtml(sm.traderModel || sm.traderSource)}</div>
+    ${sm.note ? `<p class="sum-note">${escapeHtml(sm.note)}</p>` : ''}
+    ${
+      n
+        ? `<ul class="sum-list">${sm.trades
+            .map(
+              (t) => `<li><span class="sym">${escapeHtml(t.symbol)}</span> <span class="pill pill-${t.side}">${t.side}</span>
+              <span class="mono dim">${fmtMoney(t.allocation, 0)}</span> — ${escapeHtml(t.reason)}</li>`,
+            )
+            .join('')}</ul>`
+        : ''
+    }
+    ${(sm.rejected || []).length ? `<div class="dim sum-rej">Passed on: ${sm.rejected.map(escapeHtml).join(', ')}</div>` : ''}`;
+}
+
+function allocationParts() {
+  const open = state.positions?.open || [];
+  const acct = state.positions?.account;
+  const longs = open.filter((p) => p.side === 'long').reduce((a, p) => a + p.allocation, 0);
+  const shorts = open.filter((p) => p.side === 'short').reduce((a, p) => a + p.allocation, 0);
+  const cash = Math.max(0, acct?.cash ?? 0);
+  const parts = [
+    { label: 'LONG', value: longs, color: '#22c55e' },
+    { label: 'SHORT', value: shorts, color: '#ef4444' },
+    { label: 'CASH', value: cash, color: '#8b5cf6' },
+  ].filter((a) => a.value > 0);
+  return parts.length ? parts : [{ label: 'CASH', value: 1, color: '#8b5cf6' }];
+}
+
 function renderDashboard() {
   const d = state.dashboard;
   if (!d) {
     root.innerHTML = `<div class="page"><div class="empty">Loading…</div></div>`;
     return;
   }
-
-  const acc = d.accuracy || {};
-  const accPct = acc.accuracy != null ? `${(acc.accuracy * 100).toFixed(1)}%` : '—';
-  const open = d.openPredictions || [];
-  const recent = d.recentResolved || [];
-  const allocation = (d.allocation || []).filter((a) => a.value > 0);
-  const allocFallback = allocation.length
-    ? allocation
-    : [
-        { label: 'LONG', value: 1, color: '#22c55e' },
-        { label: 'SHORT', value: 1, color: '#ef4444' },
-        { label: 'WATCH', value: 1, color: '#8b5cf6' },
-      ];
-
-  const scanned = d.watchlist?.scanned ?? 0;
-  const universe = d.watchlist?.universe ?? 0;
+  const acct = state.positions?.account;
+  const winRate = acct && acct.closedCount ? `${((acct.wins / acct.closedCount) * 100).toFixed(0)}%` : '—';
+  const parts = allocationParts();
+  const totalAlloc = parts.reduce((a, p) => a + p.value, 0);
 
   root.innerHTML = `
     <div class="page">
-      ${d.mockData ? `<div class="banner-mock">Running on mock market data — add Alpaca keys in <code>.env</code> for live scans.</div>` : ''}
+      ${d.mockData ? `<div class="banner-mock">Running on mock market data — add Alpaca keys for live scans.</div>` : ''}
       ${!d.mockData && d.fallbacks?.count ? `<div class="banner-mock">Live data failed for ${d.fallbacks.count} symbol(s) — showing MOCK prices for: ${d.fallbacks.symbols.map((f) => `<code title="${escapeHtml(f.error)}">${escapeHtml(f.symbol)}</code>`).join(' ')}</div>` : ''}
       <div class="page-toolbar">
-        <div class="tabs">
-          <button class="tab active" type="button">Dashboard</button>
-          <button class="tab" type="button" data-goto="decisions">Predictions</button>
-          <button class="tab-add" type="button">+</button>
-        </div>
+        <div></div>
         <div class="toolbar-actions">
-          <button class="btn-ghost" id="btn-scan" type="button">RUN</button>
-          <button class="btn-ghost" type="button">ADD WIDGET</button>
-          <button class="btn-ghost" type="button">EDIT LAYOUT</button>
+          <button class="btn-ghost" id="btn-scan" type="button">${runButtonLabel()}</button>
         </div>
       </div>
 
-      <div class="grid grid-dashboard">
-        <section class="widget allocation">
+      <div class="grid grid-top">
+        <section class="widget ai-summary">
+          <div class="widget-title">AI SUMMARY</div>
+          ${summaryHtml()}
+        </section>
+
+        <section class="widget allocation-box">
           <div class="widget-title">ALLOCATION</div>
           <div class="alloc-wrap">
-            <div class="donut" style="background:${donutGradient(allocFallback)}"><div class="donut-hole"></div></div>
+            <div class="donut" style="background:${donutGradient(parts)}"><div class="donut-hole"></div></div>
             <div class="legend">
-              ${allocFallback
+              ${parts
                 .map(
                   (a) => `
                 <div class="legend-row">
                   <span class="swatch" style="background:${a.color}"></span>
                   <span>${a.label}</span>
-                  <span class="muted mono">${a.value}</span>
+                  <span class="muted mono">${totalAlloc > 1 ? fmtMoney(a.value, 0) : ''}</span>
                 </div>`,
                 )
                 .join('')}
@@ -109,109 +139,15 @@ function renderDashboard() {
           </div>
         </section>
 
-        <section class="widget portfolio">
-          <div class="widget-title">
-            <span>PREDICTION ACCURACY</span>
-            <div class="range-tabs">
-              <button class="active" type="button">1D</button>
-              <button type="button">1W</button>
-              <button type="button">1M</button>
-            </div>
-          </div>
-          <div class="big-num">${accPct}</div>
-          <div class="sub-num ${acc.hits != null ? 'pos' : ''}">
-            ${acc.hits ?? 0} hits / ${acc.total ?? 0} resolved · ${acc.open ?? 0} open
-          </div>
-          <div class="chart-area"><canvas id="acc-chart"></canvas></div>
-        </section>
-
-        <section class="widget buying">
-          <div class="widget-title">SCANNER</div>
-          <div class="big-num">${scanned}<span class="muted" style="font-size:16px"> / ${universe}</span></div>
-          <div class="sub-num">${d.watchlist?.symbols?.length || 0} on today's watchlist · horizon ${d.horizonHours || 24}h</div>
-        </section>
-
-        <section class="widget positions">
-          <div class="widget-title">OPEN PREDICTIONS</div>
-          ${
-            open.length
-              ? `<table class="table">
-            <thead><tr><th>SYMBOL</th><th>DIR</th><th>ENTRY</th><th>TARGET</th><th>CONF</th><th></th></tr></thead>
-            <tbody>
-              ${open
-                .slice(0, 12)
-                .map(
-                  (p) => `
-                <tr>
-                  <td><span class="sym">${p.symbol}</span> <span class="dim">${p.direction}</span></td>
-                  <td><span class="pill pill-${p.direction}">${p.direction}</span></td>
-                  <td class="mono">${fmtMoney(p.entryPrice)}</td>
-                  <td class="mono ${clsPos(p.expectedMovePct)}">${fmtPct(p.expectedMovePct)}</td>
-                  <td class="mono">${(p.confidence * 100).toFixed(0)}%</td>
-                  <td><button class="btn-close" data-sym="${p.symbol}" type="button">Chart</button></td>
-                </tr>`,
-                )
-                .join('')}
-            </tbody>
-          </table>`
-              : `<div class="empty">No open predictions — run a scan</div>`
-          }
-        </section>
-
-        <section class="widget trades">
-          <div class="widget-title">RECENT RESULTS</div>
-          ${
-            recent.length
-              ? `<table class="table">
-            <thead><tr><th>SYMBOL</th><th>DIR</th><th>MOVE</th><th>RESULT</th></tr></thead>
-            <tbody>
-              ${recent
-                .slice(0, 12)
-                .map(
-                  (p) => `
-                <tr>
-                  <td class="sym">${p.symbol}</td>
-                  <td><span class="pill pill-${p.direction}">${p.direction}</span></td>
-                  <td class="mono ${clsPos(p.actualMovePct)}">${fmtPct(p.actualMovePct)}</td>
-                  <td><span class="pill pill-${p.correct ? 'hit' : 'miss'}">${p.correct ? 'HIT' : 'MISS'}</span></td>
-                </tr>`,
-                )
-                .join('')}
-            </tbody>
-          </table>`
-              : `<div class="empty">No settled predictions yet</div>`
-          }
-        </section>
-
-        <section class="widget perf">
-          <div class="widget-title">AI PERFORMANCE</div>
-          <div class="perf-hero">
-            <label>MODEL ACCURACY</label>
-            <div class="big-num" style="font-size:22px">${accPct}</div>
-          </div>
+        <section class="widget model-acc">
+          <div class="widget-title">MODEL ACCURACY</div>
+          <div class="big-num">${winRate}</div>
+          <div class="sub-num">${acct ? `${acct.wins} wins / ${acct.closedCount} closed trades` : 'no trades yet'}</div>
           <div class="perf-grid">
-            <div class="perf-stat"><label>WINS</label><strong>${acc.hits ?? 0}/${acc.total ?? 0}</strong></div>
-            <div class="perf-stat"><label>MODE</label><strong>predict</strong></div>
-            <div class="perf-stat"><label>BOT</label><strong>${d.worker?.status || '—'}</strong></div>
-            <div class="perf-stat"><label>WORKER</label><strong>${d.worker?.scanning ? 'scanning' : 'online'}</strong></div>
-            <div class="perf-stat"><label>MODEL</label><strong>v${d.model?.version ?? 1}</strong></div>
-            <div class="perf-stat"><label>TRAINED</label><strong>${d.model?.trainedOn ?? 0}</strong></div>
-          </div>
-        </section>
-
-        <section class="widget log">
-          <div class="widget-title">AI LOG</div>
-          <div class="log-list">
-            ${(d.logs || [])
-              .slice(0, 30)
-              .map(
-                (l) => `
-              <div class="log-row ${l.level}">
-                <span class="ts">${fmtTime(l.ts)}</span>
-                <span class="msg">${escapeHtml(l.message)}</span>
-              </div>`,
-              )
-              .join('') || '<div class="empty">No logs</div>'}
+            <div class="perf-stat"><label>EQUITY</label><strong>${fmtMoney(acct?.equity, 0)}</strong></div>
+            <div class="perf-stat"><label>REALIZED P&L</label><strong class="${clsPos(acct?.realizedPnl)}">${fmtMoney(acct?.realizedPnl, 0)}</strong></div>
+            <div class="perf-stat"><label>OPEN P&L</label><strong class="${clsPos(acct?.unrealizedPnl)}">${fmtMoney(acct?.unrealizedPnl, 0)}</strong></div>
+            <div class="perf-stat"><label>OPEN</label><strong>${acct?.openCount ?? 0}</strong></div>
           </div>
         </section>
       </div>
@@ -219,22 +155,10 @@ function renderDashboard() {
     </div>
   `;
 
-  drawAccuracyChart(document.getElementById('acc-chart'), acc.series || []);
   drawPositionChart();
 
   document.getElementById('btn-scan')?.addEventListener('click', runAiPipeline);
   bindAiWidgets();
-
-  root.querySelectorAll('[data-goto]').forEach((el) => {
-    el.addEventListener('click', () => navigate(el.dataset.goto));
-  });
-
-  root.querySelectorAll('[data-sym]').forEach((el) => {
-    el.addEventListener('click', () => {
-      state.selectedSymbol = el.dataset.sym;
-      navigate('market');
-    });
-  });
 }
 
 function runButtonLabel() {
@@ -895,12 +819,14 @@ export function navigate(page) {
 }
 
 async function refresh() {
-  const [dashboard, status, picks, positions] = await Promise.all([
+  const [dashboard, status, picks, positions, summary] = await Promise.all([
     api('/dashboard'),
     api('/status'),
     api('/ai/picks').catch(() => null),
     api('/positions').catch(() => null),
+    api('/ai/summary').catch(() => null),
   ]);
+  state.summary = summary;
   state.picks = picks;
   state.positions = positions;
   state.dashboard = dashboard;

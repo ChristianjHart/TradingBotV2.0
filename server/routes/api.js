@@ -31,6 +31,8 @@ router.post('/run', (_req, res) => {
 
 router.get('/run/status', (_req, res) => res.json(runState));
 
+router.get('/ai/summary', (_req, res) => res.json(store.getRunSummary() || {}));
+
 router.get('/ai/picks', (_req, res) => res.json(store.getAiPicks()));
 
 router.get('/positions', async (_req, res) => {
