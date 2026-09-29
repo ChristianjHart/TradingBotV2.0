@@ -8,8 +8,10 @@ import { listPositions, closeManually, closeAll } from '../services/positions.js
 import { computePerformance } from '../services/performance.js';
 import { pickStats } from '../services/picks.js';
 import { usMarketOpen } from '../services/market.js';
-import { requireAdmin, rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
+import { rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
 import { UNIVERSE } from '../services/universe.js';
+import { resolveAuth, authGate, csrfGuard } from '../auth/index.js';
+import { authRouter, accountRouter } from './auth.js';
 
 const router = Router();
 
@@ -37,6 +39,8 @@ const wantsForce = (req) => /^(1|true)$/i.test(String(req.query.force ?? req.bod
 const accuracy = () => pickStats(store.getPickScores(), openPickCount());
 const openPickCount = () => store.getPickScores().filter((r) => !r.scored).length;
 
+// Order matters: CSRF -> who is calling -> public routes (health, /auth/*) -> gate -> everything else.
+router.use(csrfGuard, resolveAuth);
 router.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -50,10 +54,13 @@ router.get('/health', (_req, res) => {
   });
 });
 
-router.get('/auth/status', (_req, res) => res.json({ required: Boolean(config.adminToken) }));
+
+router.use('/auth', authRouter);
+router.use(authGate); // from here on a valid session cookie or Bearer ADMIN_TOKEN is required (once an account or ADMIN_TOKEN exists)
+router.use('/account', accountRouter);
 
 // A stopped/killed worker must not spend credits or open positions: 409 (exits stay managed by the monitor).
-router.post('/run', requireAdmin, runLimit, (_req, res) => {
+router.post('/run', runLimit, (_req, res) => {
   const ws = store.getWorker().status;
   if (ws === 'stopped' || ws === 'killed') {
     return res.status(409).json({ error: `worker is ${ws}: start the worker before running the AI desk`, code: 'worker_not_running', workerStatus: ws });
@@ -89,7 +96,7 @@ router.get('/positions', asyncHandler(async (_req, res) => {
 }));
 
 // Body/query `force` closes at the last (stale) price. Errors: 409 stale quote, 502 no quote (nothing closed).
-router.post('/positions/close-all', requireAdmin, asyncHandler(async (req, res) => {
+router.post('/positions/close-all', asyncHandler(async (req, res) => {
   try {
     const r = await closeAll({ force: wantsForce(req) });
     if (r.failed.length && !r.closed) {
@@ -102,7 +109,7 @@ router.post('/positions/close-all', requireAdmin, asyncHandler(async (req, res) 
   }
 }));
 
-router.post('/positions/:id/close', requireAdmin, asyncHandler(async (req, res) => {
+router.post('/positions/:id/close', asyncHandler(async (req, res) => {
   try {
     res.json(await closeManually(req.params.id, { force: wantsForce(req) }));
   } catch (err) {
@@ -178,7 +185,7 @@ router.get('/settings', (_req, res) => {
   res.json({ ...store.getSettings(), tradingEnabled: false });
 });
 
-router.patch('/settings', requireAdmin, (req, res) => {
+router.patch('/settings', (req, res) => {
   const { value, error } = validateSettings(req.body);
   if (error) return res.status(400).json({ error });
   const next = {
@@ -192,19 +199,19 @@ router.patch('/settings', requireAdmin, (req, res) => {
   res.json(next);
 });
 
-router.post('/worker/stop', requireAdmin, (_req, res) => {
+router.post('/worker/stop', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'stopped', scanning: false });
   store.addLog({ level: 'info', message: 'worker stopped (scheduled runs paused)' });
   res.json(store.getWorker());
 });
 
-router.post('/worker/start', requireAdmin, (_req, res) => {
+router.post('/worker/start', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'online' });
   store.addLog({ level: 'info', message: 'worker online' });
   res.json(store.getWorker());
 });
 
-router.post('/worker/kill', requireAdmin, (_req, res) => {
+router.post('/worker/kill', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'killed', scanning: false });
   store.addLog({ level: 'warn', message: 'worker KILL — scheduled runs halted' });
   res.json(store.getWorker());

@@ -6,14 +6,23 @@ import { startAiRun } from './services/aiRun.js';
 import { scorePicks } from './services/pickScoring.js';
 import { alpaca } from './services/alpaca.js';
 import { monitorPositions } from './services/positions.js';
-import { guarded } from './services/jobs.js';
+import { guarded, scheduledRunSkipReason } from './services/jobs.js';
 import { warnIfProxyMisconfigured } from './middleware.js';
 import { hydrateFromSupabase } from './db/hydrate.js';
 import { supabaseEnabled } from './db/supabase.js';
+import { applyOwnerCredentials } from './auth/accounts.js';
 import { installProcessHandlers, installShutdownHandlers } from './lifecycle.js';
 
 installProcessHandlers();
 installShutdownHandlers();
+
+// Account-attached keys (local users file) take effect before anything reads credentials; re-applied after the Supabase restore.
+applyOwnerCredentials();
+if (!config.appSecret) {
+  const msg = 'APP_SECRET is not set: sessions use a random per-boot secret (everyone is signed out on restart) and API keys CANNOT be saved. Set APP_SECRET to a long random string.';
+  console.warn(`\n[security] WARNING: ${msg}\n`);
+  store.addLog({ level: 'warn', message: msg });
+}
 
 const app = createApp();
 
@@ -43,7 +52,7 @@ cron.schedule(
   `*/${minutes} * * * *`,
   guarded('run', () => {
     const settings = store.getSettings();
-    if (workerAlive() && settings.autoRun && !startAiRun()) store.addLog({ level: 'warn', message: 'cron run: a run is already in progress, skipping' });
+    if (workerAlive() && settings.autoRun && !scheduledRunSkipReason() && !startAiRun()) store.addLog({ level: 'warn', message: 'cron run: a run is already in progress, skipping' });
   }),
 );
 
@@ -53,5 +62,7 @@ app.listen(config.port, host, () => {
   console.log(`Supabase: ${supabaseEnabled ? 'ON' : 'off'}`);
   console.log(`Data mode: ${alpaca.usingMock() ? 'MOCK' : 'ALPACA'}`);
   warnIfProxyMisconfigured((message) => store.addLog({ level: 'warn', message }));
-  hydrateFromSupabase().finally(bootWorker);
+  hydrateFromSupabase()
+    .then(() => applyOwnerCredentials())
+    .finally(bootWorker);
 });

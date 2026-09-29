@@ -1,9 +1,11 @@
 import { store } from './store.js';
 import { select, supabaseEnabled } from './supabase.js';
+import { usersRepo } from './users.js';
 
 /** Render's disk is ephemeral: on boot, restore positions, runs, equity, picks from Supabase if local files are empty. */
 export async function hydrateFromSupabase() {
   if (!supabaseEnabled) return;
+  await usersRepo.restoreFromSupabase(); // accounts first: their keys become the active credentials
   try {
     if (!store.getPositions().length) {
       const rows = await select('positions', 'select=raw&order=opened_at.desc&limit=1000');

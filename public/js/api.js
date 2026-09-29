@@ -1,3 +1,5 @@
+import { decide401 } from './auth-logic.js';
+
 const API = '/api';
 const TOKEN_KEY = 'tb_admin_token';
 
@@ -24,10 +26,26 @@ export function onUnauthorized(fn) {
   unauthorizedHandler = fn;
 }
 
+/** Registered by the auth module: called once when any request gets 401 login_required. */
+let sessionEndedHandler = null;
+export function onSessionEnded(fn) {
+  sessionEndedHandler = fn;
+}
+/** 'session' | 'token' | 'none' | null (unknown) — set from GET /api/auth/status. */
+let authMode = null;
+export function setAuthMode(m) {
+  authMode = m || null;
+}
+export function getAuthMode() {
+  return authMode;
+}
+
 export class ApiError extends Error {
   constructor(message, status) {
     super(message);
     this.status = status;
+    this.code = null;
+    this.retryAfter = null;
   }
 }
 
@@ -38,20 +56,49 @@ async function doFetch(path, options) {
   return fetch(`${API}${path}`, { ...options, headers });
 }
 
+/**
+ * options.skipAuthRedirect: for /auth/* calls — a 401 there is a normal error (wrong password), not "session ended".
+ * Never logs request bodies (they can contain passwords / API keys).
+ */
 export async function api(path, options = {}) {
-  let res = await doFetch(path, options);
-  if (res.status === 401 && unauthorizedHandler) {
-    pendingAuth = pendingAuth || unauthorizedHandler().finally(() => (pendingAuth = null));
-    const token = await pendingAuth;
-    if (token) {
-      setToken(token);
-      res = await doFetch(path, options);
+  const { skipAuthRedirect = false, ...fetchOpts } = options;
+  let res;
+  try {
+    res = await doFetch(path, fetchOpts);
+  } catch {
+    const ne = new ApiError('Cannot reach the server', 0);
+    ne.network = true;
+    throw ne;
+  }
+  let errBody = null;
+  if (res.status === 401) {
+    errBody = await res
+      .clone()
+      .json()
+      .catch(() => ({}));
+    const action = decide401({ code: errBody?.code, mode: authMode, skipRedirect: skipAuthRedirect });
+    if (action === 'token' && unauthorizedHandler) {
+      pendingAuth = pendingAuth || unauthorizedHandler().finally(() => (pendingAuth = null));
+      const token = await pendingAuth;
+      if (token) {
+        setToken(token);
+        res = await doFetch(path, fetchOpts);
+        errBody = null;
+      }
+    } else if (action === 'login' && sessionEndedHandler) {
+      try {
+        sessionEndedHandler();
+      } catch {
+        /* handler must never break the request flow */
+      }
     }
   }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = errBody || (await res.json().catch(() => ({ error: res.statusText })));
     const apiErr = new ApiError(err.error || res.statusText || `HTTP ${res.status}`, res.status);
     apiErr.data = err;
+    apiErr.code = err.code || null;
+    apiErr.retryAfter = res.headers.get('Retry-After');
     apiErr.stale = err.stale === true;
     throw apiErr;
   }

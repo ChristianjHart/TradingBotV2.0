@@ -1,4 +1,5 @@
 import { api, escapeHtml as esc, getToken } from './api.js';
+import { mountAccount } from './account.js';
 import { authClick } from './chrome.js';
 import { refresh } from './data.js';
 import { $, root, state } from './state.js';
@@ -22,13 +23,15 @@ export function mountSettings() {
       <dl class="kv">
         <dt>Data mode</dt><dd>${esc(st.dataMode || 'unknown')}</dd>
         <dt>Market</dt><dd>${st.marketOpen == null ? 'unknown' : st.marketOpen ? 'US stocks open' : 'US stocks closed'}</dd>
-        <dt>Alpaca keys</dt><dd>${st.alpacaConfigured ? 'configured' : 'missing (mock data)'}</dd>
-        <dt>OpenRouter key</dt><dd>${st.openrouterConfigured ? 'configured' : '<span class="neg">missing (rule-based fallback)</span>'}</dd>
+        <dt>Alpaca keys</dt><dd>${st.alpacaConfigured ? 'configured' : 'missing (mock data) — <a href="#settings">add them under Account</a>'}</dd>
+        <dt>OpenRouter key</dt><dd>${st.openrouterConfigured ? 'configured' : '<span class="neg">missing (rule-based fallback)</span> — <a href="#settings">add it under Account</a>'}</dd>
         <dt>Supabase</dt><dd>${st.supabaseConfigured ? 'connected' : 'not configured (data resets on restart)'}</dd>
-        <dt>Admin auth</dt><dd>${state.auth.required ? (getToken() ? 'required — token saved in this browser' : 'required — not signed in') : 'not required'}</dd>
+        <dt>Access control</dt><dd>${state.auth.mode === 'session' ? `signed in${state.auth.user ? ` as ${esc(state.auth.user.email)}` : ''}` : state.auth.required ? (getToken() ? 'admin token saved in this browser' : 'admin token required — not signed in') : 'open (no login)'}</dd>
       </dl>
-      ${state.auth.required ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
-    </section></div></div>`;
+      ${state.auth.required && state.auth.mode !== 'session' ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
+    </section></div>
+    <div class="settings-grid account-grid" id="account-root" aria-live="polite"></div></div>`;
+  if (state.auth.mode !== 'token') mountAccount($('account-root'));
   $('btn-auth2')?.addEventListener('click', authClick);
   $('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();

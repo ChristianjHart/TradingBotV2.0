@@ -73,11 +73,11 @@ export function bannersHtml() {
   const s = state.status || {};
   const out = [];
   if (state.loadError) out.push(`<div class="notice" role="alert">Can’t reach the server (${esc(state.loadError)}). Showing the last data received${state.lastUpdate ? ` at ${esc(fmtTime(state.lastUpdate))}` : ''}; retrying automatically.</div>`);
-  if (s.mockData) out.push('<div class="banner-mock">Running on <strong>mock</strong> market data — add Alpaca keys for live scans. Prices and results are synthetic.</div>');
+  if (s.mockData) out.push('<div class="banner-mock">Running on <strong>mock</strong> market data — <a href="#settings">Add your Alpaca keys under Settings → Account</a> for live scans. Prices and results are synthetic.</div>');
   else if (s.fallbacks?.count) out.push(`<div class="banner-mock">Live data failed for ${s.fallbacks.count} symbol(s) — showing MOCK prices for: ${(s.fallbacks.symbols || []).map((f) => `<code title="${esc(f.error)}">${esc(f.symbol)}</code>`).join(' ')}</div>`);
   if (s.marketOpen === false) out.push('<div class="banner-mock">US stock market is closed — stock prices are the last close and stock stops are not evaluated. Crypto trades 24/7.</div>');
   if ((s.staleSymbols || []).length) out.push(`<div class="banner-mock">Stale quotes: ${s.staleSymbols.map((x) => `<code>${esc(x)}</code>`).join(' ')}</div>`);
-  if (state.status && !s.openrouterConfigured) out.push('<div class="notice">OpenRouter key missing — the run uses the rule-based fallback instead of AI.</div>');
+  if (state.status && !s.openrouterConfigured) out.push('<div class="notice">OpenRouter key missing — the run uses the rule-based fallback instead of AI. <a href="#settings">Add it under Settings → Account</a>.</div>');
   return out.join('');
 }
 
@@ -85,7 +85,7 @@ export function sysStripHtml() {
   const s = state.status;
   if (!s) return '';
   const w = s.worker?.status;
-  return `Data: ${esc(s.dataMode || '?')} · Supabase: ${s.supabaseConfigured ? 'yes' : 'no'} · OpenRouter: ${s.openrouterConfigured ? 'yes' : '<span class="neg">MISSING</span>'}${w && w !== 'online' ? ` · Worker: <span class="neg">${esc(w)}</span>` : ''}`;
+  return `Data: ${esc(s.dataMode || '?')} · Supabase: ${s.supabaseConfigured ? 'yes' : 'no'} · OpenRouter: ${s.openrouterConfigured ? 'yes' : '<a class="neg" href="#settings" title="Add your OpenRouter key under Settings → Account">MISSING</a>'}${w && w !== 'online' ? ` · Worker: <span class="neg">${esc(w)}</span>` : ''}`;
 }
 
 /** Label for the picks source, derived from picks.source + /api/status openrouterConfigured. */

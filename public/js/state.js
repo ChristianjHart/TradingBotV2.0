@@ -19,7 +19,9 @@ export const state = {
   perf: null,
   runs: null,
   logs: null,
-  auth: { required: false },
+  auth: { required: false, mode: null, user: null, setupRequired: false, signupOpen: false, signupNeedsCode: false },
+  locked: false, // true while the sign-in screen is showing: polling/timers stop and no private data is kept
+  account: null,
   run: null,
   runLastStage: null,
   posTab: 'open',

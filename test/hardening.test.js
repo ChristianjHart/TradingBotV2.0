@@ -219,7 +219,7 @@ test('stopped/killed worker: /run is 409 and the trader opens nothing; monitor s
   const id = mkPos(store, { symbol: 'AAA' });
   for (const status of ['stopped', 'killed']) {
     store.setWorker({ ...store.getWorker(), status });
-    const r = await get('/api/run', { method: 'POST' });
+    const r = await get('/api/run', { method: 'POST', headers: { 'content-type': 'application/json' } });
     assert.equal(r.status, 409);
     const body = await r.json();
     assert.equal(body.code, 'worker_not_running');

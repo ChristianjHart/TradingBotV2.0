@@ -1,4 +1,4 @@
-import { config, hasAlpacaCredentials } from '../config.js';
+import { config, onCredentialsChange, scrubSecrets } from '../config.js';
 import { loggedFetch } from './http.js';
 import { validateBars } from './bars.js';
 import { isCrypto, assetClassOf, isStale } from './market.js';
@@ -86,7 +86,7 @@ async function alpacaFetch(urlPath, { data = true } = {}) {
       const res = await loggedFetch('alpaca', `${base}${urlPath}`, { headers });
       if (res.ok) return await res.json();
       const text = await res.text();
-      lastErr = new Error(`Alpaca ${res.status}: ${text.slice(0, 200)}`);
+      lastErr = new Error(`Alpaca ${res.status}: ${scrubSecrets(text).slice(0, 200)}`);
       if (res.status !== 429 && res.status < 500) throw Object.assign(lastErr, { fatal: true });
       retryAfter = res.headers.get('retry-after');
     } catch (err) {
@@ -136,6 +136,13 @@ const fallbacks = new Map();
 // symbol -> true when the latest live bar is stale (closed market / old data)
 const staleMap = new Map();
 
+// New/changed credentials (login, key update): drop everything fetched with the old ones.
+onCredentialsChange(() => {
+  cache.clear();
+  fallbacks.clear();
+  staleMap.clear();
+});
+
 function remember(symbol, timeframe, limit, rawBars) {
   const { bars } = validateBars(rawBars);
   if (!bars.length) return null;
@@ -163,7 +170,7 @@ export const alpaca = {
   },
 
   usingMock() {
-    return config.useMockData || !hasAlpacaCredentials();
+    return config.useMockData; // dynamic: USE_MOCK_DATA or no Alpaca credentials (account or env) right now
   },
 
   /** Drop cached bars (start of every run). */

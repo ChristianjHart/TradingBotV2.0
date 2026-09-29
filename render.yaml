@@ -26,8 +26,15 @@ services:
         value: https://paper-api.alpaca.markets
       - key: ALPACA_DATA_URL
         value: https://data.alpaca.markets
+      # Signs session cookies and encrypts the account's stored API keys. Generated once by Render; do NOT change it
+      # later (stored keys would become unreadable and would have to be re-entered).
+      - key: APP_SECRET
+        generateValue: true
       # Secrets: set these in the Render dashboard (never commit values).
-      # ADMIN_TOKEN protects the credit-spending / mutating endpoints (/api/run, close, settings, worker). SET IT.
+      # SIGNUP_CODE: required to create the owner account (open the site after deploy, sign up with this code). SET IT.
+      - key: SIGNUP_CODE
+        sync: false
+      # ADMIN_TOKEN (optional): Bearer token for scripts; also accepted as the signup code when SIGNUP_CODE is unset.
       - key: ADMIN_TOKEN
         sync: false
       # Live Alpaca data: set both keys, then set USE_MOCK_DATA=false.

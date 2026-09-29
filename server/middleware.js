@@ -1,16 +1,4 @@
-import crypto from 'crypto';
 import { config } from './config.js';
-
-const digest = (s) => crypto.createHash('sha256').update(String(s)).digest();
-
-/** Bearer-token guard. Disabled (open) when ADMIN_TOKEN is unset. */
-export function requireAdmin(req, res, next) {
-  const token = config.adminToken;
-  if (!token) return next();
-  const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
-  if (m && crypto.timingSafeEqual(digest(m[1]), digest(token))) return next();
-  res.status(401).json({ error: 'unauthorized' });
-}
 
 /**
  * Client key for rate limiting. Behind a reverse proxy (Render, nginx) req.ip is the proxy for every

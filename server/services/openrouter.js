@@ -1,4 +1,4 @@
-import { config, hasOpenRouterKey } from '../config.js';
+import { config, hasOpenRouterKey, scrubSecrets } from '../config.js';
 import { insert } from '../db/supabase.js';
 import { loggedFetch } from './http.js';
 
@@ -13,7 +13,7 @@ export function extractJson(text) {
 
 /** One model call. Always writes an ai_logs row: full prompt sent + raw reply (or the error). */
 export async function chatJson({ bot, model, system, user, maxTokens = 8000, timeoutMs = 170_000 }) {
-  if (!hasOpenRouterKey()) throw new Error('OPENROUTER_API_KEY not set');
+  if (!hasOpenRouterKey()) throw new Error('OpenRouter key not set (add it under Settings → Account or set OPENROUTER_API_KEY)');
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -32,8 +32,8 @@ export async function chatJson({ bot, model, system, user, maxTokens = 8000, tim
       signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await res.text();
-    log.response = text;
-    if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${text.slice(0, 200)}`);
+    log.response = scrubSecrets(text);
+    if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${scrubSecrets(text).slice(0, 200)}`);
     const data = JSON.parse(text);
     log.usage = data.usage || null;
     const content = data.choices?.[0]?.message?.content;
@@ -43,7 +43,7 @@ export async function chatJson({ bot, model, system, user, maxTokens = 8000, tim
     log.ok = true;
     return { json, usage: log.usage };
   } catch (err) {
-    log.error = err.message;
+    log.error = scrubSecrets(err.message);
     throw err;
   } finally {
     insert('ai_logs', { ...log, duration_ms: Date.now() - started });

@@ -6,7 +6,7 @@ const { store } = await import('../server/db/store.js');
 const { runTraderBot } = await import('../server/services/traderBot.js');
 const { getAccount, monitorPositions, closeAll } = await import('../server/services/positions.js');
 const { normalize } = await import('../server/db/supabase.js');
-const { validateSettings, requireAdmin, SETTING_RULES } = await import('../server/middleware.js');
+const { validateSettings, SETTING_RULES } = await import('../server/middleware.js');
 const { config } = await import('../server/config.js');
 const { alpaca } = await import('../server/services/alpaca.js');
 
@@ -56,16 +56,21 @@ test('settings validation whitelists and range-checks', () => {
   assert.ok(Object.keys(SETTING_RULES).length > 5);
 });
 
-test('requireAdmin is open without a token and strict with one', () => {
+test('auth gate is open without an account/token and strict (401 login_required) with an ADMIN_TOKEN', async () => {
+  const { authGate, resolveAuth } = await import('../server/auth/index.js');
   const run = (header) => {
+    const req = { headers: {}, get: (h) => (h.toLowerCase() === 'authorization' ? header : undefined) };
     let status = 200;
+    let body;
     let nexted = false;
-    requireAdmin({ get: () => header }, { status(s) { status = s; return { json() {} }; } }, () => (nexted = true));
-    return { status, nexted };
+    resolveAuth(req, {}, () => {});
+    authGate(req, { status(s) { status = s; return { json(b) { body = b; } }; } }, () => (nexted = true));
+    return { status, body, nexted };
   };
   assert.equal(run(undefined).nexted, true);
   config.adminToken = 's3cret';
   assert.equal(run(undefined).status, 401);
+  assert.equal(run(undefined).body.code, 'login_required');
   assert.equal(run('Bearer wrong').status, 401);
   assert.equal(run('Bearer s3cret').nexted, true);
   config.adminToken = '';

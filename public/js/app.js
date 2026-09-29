@@ -1,4 +1,4 @@
-import { apiOptional } from './api.js';
+import { gate, initAuth } from './auth.js';
 import { bindChrome, navActive, setWorkerUI, updateAuthUI } from './chrome.js';
 import { bannersHtml, mountDashboard, patchDashboard, patchUpdated } from './dashboard.js';
 import { refresh } from './data.js';
@@ -66,44 +66,51 @@ function routeFromHash() {
 
 let pollTimer = null;
 async function poll() {
-  if (document.hidden) return;
+  if (document.hidden || state.locked) return;
   try {
     await refresh();
   } catch {
     /* state.loadError is set */
   }
-  patchCurrent();
+  if (!state.locked) patchCurrent();
 }
 
-async function boot() {
-  hooks.patchCurrent = patchCurrent;
-  bindChrome();
-  window.addEventListener('hashchange', () => {
-    state.page = routeFromHash();
-    render();
-    $('view-root').focus({ preventScroll: true });
-    window.scrollTo(0, 0);
-  });
+/** Load data for the current hash route (used at boot and again after signing in). */
+async function startApp() {
   state.page = routeFromHash();
   render();
   hydrateRun();
-  const auth = await apiOptional('/auth/status');
-  state.auth.required = !!auth?.required;
   updateAuthUI();
   try {
     await refresh();
   } catch {
     state.loaded = true; // stop skeletons; banner explains
   }
+  if (state.locked) return;
   patchCurrent();
   if (state.page === 'settings') mountSettings();
+}
+
+async function boot() {
+  hooks.patchCurrent = patchCurrent;
+  bindChrome();
+  window.addEventListener('hashchange', () => {
+    if (state.locked) return; // the route is kept and restored after sign-in
+    state.page = routeFromHash();
+    render();
+    $('view-root').focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  });
+  initAuth({ onUnlock: startApp });
+  const open = await gate(); // shows the sign-in screen (and stops here) when a login is required
+  if (open) await startApp();
   pollTimer = setInterval(poll, POLL_MS);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) poll();
   });
   // 1s ticker: countdowns + run timer (paused when hidden)
   setInterval(() => {
-    if (document.hidden) return;
+    if (document.hidden || state.locked) return;
     document.querySelectorAll('[data-exp]').forEach((el) => {
       if (el.dataset.exp) setText(el, leftText(el.dataset.exp));
     });

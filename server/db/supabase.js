@@ -56,6 +56,13 @@ export function upsert(table, row) {
   queue.push({ table, row, upsert: true });
 }
 
+/** Awaited upsert (throws on failure) for rows that must not be silently lost, e.g. accounts. No-op when disabled. */
+export async function upsertNow(table, row) {
+  if (!supabaseEnabled) return false;
+  await post(table, [row], true);
+  return true;
+}
+
 export async function flush() {
   if (!supabaseEnabled || flushing || !queue.length) return;
   flushing = true;

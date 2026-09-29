@@ -1,4 +1,5 @@
 import { api, getToken, onUnauthorized, setToken } from './api.js';
+import { signOut, updateAccountChrome } from './auth.js';
 import { refresh } from './data.js';
 import { mountSettings } from './settings.js';
 import { hooks, $, setText, state } from './state.js';
@@ -16,7 +17,8 @@ export function setWorkerUI(worker) {
 export function updateAuthUI() {
   const b = $('btn-auth');
   if (!b) return;
-  b.hidden = !state.auth.required;
+  updateAccountChrome();
+  b.hidden = !state.auth.required || state.auth.mode === 'session';
   b.textContent = getToken() ? 'Sign out' : 'Sign in';
   b.setAttribute('aria-label', getToken() ? 'Sign out (forget admin token)' : 'Sign in with admin token');
 }
@@ -81,4 +83,5 @@ export function bindChrome() {
     }
   });
   $('btn-auth').addEventListener('click', authClick);
+  $('btn-signout').addEventListener('click', (e) => signOut(e.currentTarget));
 }

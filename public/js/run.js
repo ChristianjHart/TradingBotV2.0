@@ -78,6 +78,7 @@ export async function trackRun() {
   let lastStage = null;
   try {
     for (;;) {
+      if (state.locked) break;
       const st = await api('/run/status');
       if (st.running) state.runLastStage = st.stage;
       state.run = { ...st };
