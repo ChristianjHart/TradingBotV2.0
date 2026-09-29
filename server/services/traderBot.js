@@ -8,7 +8,7 @@ const MAX_RISK_PCT = 0.02; // of equity lost if the stop is hit
 
 const SYSTEM = `You are a disciplined risk-aware trading desk. You receive screened candidates (with price and ATR% = hourly average true range as % of price), the account state, and the number of free position slots.
 Decide which candidates are actually worth trading and choose AT MOST the given number of slots. For each trade give: symbol, side ("long" or "short"), allocationUsd (dollars of the account to commit), stopLoss (a price that exits the trade if it moves against us, so we never lose the whole allocation), takeProfit (a price at which we lock in the gain), and a one-sentence reason.
-Rules: stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Skipping weak setups is fine — fewer trades is better than bad trades.
+Rules: stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
 Reply with ONLY JSON: {"trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
 
 function rulesTrades(cands, slots) {
@@ -78,11 +78,18 @@ export async function runTraderBot(picks) {
   const byCand = new Map(cands.map((c) => [c.symbol, c]));
   let cash = account.cash;
   const opened = [];
+  const skipped = [];
   for (const t of proposed) {
     if (opened.length >= slots) break;
     const c = byCand.get(t.symbol);
-    if (!c || !['long', 'short'].includes(t.side)) continue;
-    if (opened.some((o) => o.symbol === t.symbol)) continue;
+    if (!c || !['long', 'short'].includes(t.side)) {
+      skipped.push(`${t.symbol} (unknown symbol or bad side)`);
+      continue;
+    }
+    if (opened.some((o) => o.symbol === t.symbol)) {
+      skipped.push(`${t.symbol} (duplicate)`);
+      continue;
+    }
     const entry = c.price;
     let stop = Number(t.stopLoss);
     let target = Number(t.takeProfit);
@@ -100,7 +107,10 @@ export async function runTraderBot(picks) {
     let alloc = Number(t.allocationUsd);
     if (!Number.isFinite(alloc)) alloc = Infinity;
     alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / riskDist, cash);
-    if (!(alloc >= 100)) continue;
+    if (!(alloc >= 100)) {
+      skipped.push(`${t.symbol} (no cash left)`);
+      continue;
+    }
 
     cash -= alloc;
     const pos = {
@@ -119,6 +129,9 @@ export async function runTraderBot(picks) {
     openPosition(pos);
     opened.push(pos);
   }
-  store.addLog({ level: 'info', message: `trader bot (${source}) opened ${opened.length} simulated position(s)` });
+  store.addLog({
+    level: 'info',
+    message: `trader bot (${source}): model proposed ${proposed.length} of ${cands.length} candidates, opened ${opened.length} (slots ${slots})${skipped.length ? `; rejected: ${skipped.join(', ')}` : ''}`,
+  });
   return { source, model, opened };
 }
