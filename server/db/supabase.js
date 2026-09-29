@@ -1,7 +1,9 @@
 // Minimal Supabase (PostgREST) client — no SDK dependency. Server-side only (service-role key).
 // Writes are queued and flushed in batches; failures never break the app.
-const URL_ = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+import { envAny } from '../config.js';
+
+const URL_ = envAny('SUPABASE_URL').replace(/\/+$/, '');
+const KEY = envAny('SUPABASE_SERVICE_ROLE_KEY');
 
 export const supabaseEnabled = Boolean(URL_ && KEY);
 
@@ -13,7 +15,22 @@ function headers(extra = {}) {
   return { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', ...extra };
 }
 
+// PostgREST bulk inserts require every object to have the same keys.
+function normalize(rows) {
+  const keys = new Set(rows.flatMap((r) => Object.keys(r)));
+  return rows.map((r) => Object.fromEntries([...keys].map((k) => [k, r[k] === undefined ? null : r[k]])));
+}
+
+const lastWarn = new Map();
+function warnOnce(key, msg) {
+  const now = Date.now();
+  if (now - (lastWarn.get(key) || 0) < 60_000) return;
+  lastWarn.set(key, now);
+  console.warn(`[supabase] ${msg}`);
+}
+
 async function post(table, rows, upsert) {
+  rows = normalize(rows);
   const q = upsert ? '?on_conflict=id' : '';
   const res = await fetch(`${URL_}/rest/v1/${table}${q}`, {
     method: 'POST',
@@ -53,7 +70,7 @@ export async function flush() {
     try {
       await post(g.table, g.rows, g.upsert);
     } catch (err) {
-      console.warn(`[supabase] ${err.message}`);
+      warnOnce(g.table, err.message);
       // keep rows for one retry cycle unless the queue is already big
       if (queue.length < MAX_QUEUE / 2) queue.push(...g.rows.map((row) => ({ table: g.table, row, upsert: g.upsert })));
     }
