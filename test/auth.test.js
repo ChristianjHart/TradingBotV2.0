@@ -281,7 +281,7 @@ test('gate: Bearer ADMIN_TOKEN works for scripts (with and without an account); 
   assert.equal(r.status, 200);
   const st = await call('GET', '/auth/status');
   assert.equal(st.body.required, true);
-  assert.equal(st.body.mode, 'token');
+  assert.equal(st.body.mode, 'setup');
   assert.equal(st.body.setupRequired, true);
   assert.equal(st.body.signupNeedsCode, true);
   await signup('owner@example.com', { code: 'tok-admin-1' });
@@ -529,4 +529,12 @@ test('signupState policy helper', () => {
   process.env.SIGNUP_CODE = 'abc';
   assert.equal(signupState(req('8.8.8.8')).open, true);
   assert.equal(signupState(req('8.8.8.8')).needsCode, true);
+});
+
+test('first run with ADMIN_TOKEN set shows the create-account screen (mode setup), never a token-only dead end', async () => {
+  // Regression: the SPA only showed a token prompt (and a "Sign out" that just forgot the token) when ADMIN_TOKEN was
+  // set and no account existed, so the owner could never reach the create-account screen.
+  const { needsAuthScreen } = await import('../public/js/auth-logic.js');
+  const status = { mode: 'setup', required: true, setupRequired: true, signupNeedsCode: true, user: null };
+  assert.equal(needsAuthScreen(status), true);
 });
