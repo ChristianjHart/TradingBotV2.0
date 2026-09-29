@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import { insert } from './supabase.js';
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -109,6 +110,7 @@ export const store = {
       message: entry.message,
     });
     writeJson(files.logs, logs.slice(0, 500));
+    insert('app_logs', { ts: logs[0].ts, level: logs[0].level, message: logs[0].message });
   },
 
   getSettings() {

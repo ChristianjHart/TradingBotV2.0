@@ -5,6 +5,7 @@ import { chatJson } from './openrouter.js';
 import { UNIVERSE } from './universe.js';
 import { config, hasOpenRouterKey } from '../config.js';
 import { store } from '../db/store.js';
+import { insert } from '../db/supabase.js';
 
 const TOP_N = 100;
 
@@ -79,6 +80,7 @@ export async function runScannerBot(data) {
   if (hasOpenRouterKey()) {
     try {
       const { json } = await chatJson({
+        bot: 'scanner',
         model: config.openrouter.scannerModel,
         system: SYSTEM,
         user: JSON.stringify(data.map((d) => d.row)),
@@ -119,5 +121,12 @@ export async function runScannerBot(data) {
     scanned: data.length,
   };
   store.setAiPicks(result);
+  insert('watchlists', {
+    source: result.source,
+    model: result.model,
+    universe: result.universe,
+    scanned: result.scanned,
+    picks: result.picks,
+  });
   return result;
 }

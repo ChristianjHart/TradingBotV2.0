@@ -10,6 +10,9 @@ import { runMarketScan } from './services/scanner.js';
 import { evaluateOpenPredictions } from './services/evaluator.js';
 import { alpaca } from './services/alpaca.js';
 import { monitorPositions } from './services/positions.js';
+import { requestLogger } from './services/http.js';
+import { hydrateFromSupabase } from './db/hydrate.js';
+import { supabaseEnabled } from './db/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -17,7 +20,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use('/api', api);
+app.use('/api', requestLogger, api);
 
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
@@ -68,6 +71,7 @@ cron.schedule('*/5 * * * *', () => monitorPositions().catch(() => {}));
 const host = process.env.HOST || '0.0.0.0';
 app.listen(config.port, host, () => {
   console.log(`TradingBot V2.0 (predict-only) → http://${host}:${config.port}`);
+  console.log(`Supabase: ${supabaseEnabled ? 'ON' : 'off'}`);
   console.log(`Data mode: ${alpaca.usingMock() ? 'MOCK' : 'ALPACA'}`);
-  bootScan();
+  hydrateFromSupabase().finally(bootScan);
 });
