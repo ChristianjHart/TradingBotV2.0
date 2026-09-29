@@ -228,7 +228,8 @@ test('routes: close-all reports closed + failed; all-failed maps to 409/502', as
 test('routes: retired legacy endpoints are gone; status/settings stay', async () => {
   for (const p of ['/train', '/model', '/evaluate', '/watchlist', '/predictions', '/predictions/open', '/accuracy', '/scan']) {
     const r = await api(p, { method: p === '/train' || p === '/evaluate' || p === '/scan' ? 'POST' : 'GET' });
-    assert.equal(r.body.html, true, `${p} should fall through to the SPA page, not an API handler`);
+    assert.equal(r.status, 404, `${p} should be a JSON 404 (never an API handler, never the SPA page)`);
+    assert.equal(r.body.error, 'not found');
   }
   const s = await api('/status');
   assert.equal(s.status, 200);

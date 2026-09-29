@@ -115,7 +115,7 @@ function wire() {
   pw.addEventListener('submit', (e) => {
     e.preventDefault();
     const v = { current: pw.querySelector('#pw-cur').value, next: pw.querySelector('#pw-new').value, confirm: pw.querySelector('#pw-conf').value };
-    const errs = validatePasswordChange(v);
+    const errs = validatePasswordChange(v, state.auth.user?.email || state.account?.email || '');
     ['current', 'next', 'confirm'].forEach((k) => {
       const id = { current: 'pw-cur', next: 'pw-new', confirm: 'pw-conf' }[k];
       pw.querySelector(`#${id}-e`).textContent = errs[k] || '';

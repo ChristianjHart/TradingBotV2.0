@@ -10,7 +10,7 @@ import { pickStats } from '../services/picks.js';
 import { usMarketOpen } from '../services/market.js';
 import { rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
 import { UNIVERSE } from '../services/universe.js';
-import { resolveAuth, authGate, csrfGuard } from '../auth/index.js';
+import { resolveAuth, authGate, csrfGuard, setupGuard } from '../auth/index.js';
 import { authRouter, accountRouter } from './auth.js';
 
 const router = Router();
@@ -56,6 +56,7 @@ router.get('/health', (_req, res) => {
 
 
 router.use('/auth', authRouter);
+router.use(setupGuard); // production with no account and no ADMIN_TOKEN: 503 setup_required (fail closed)
 router.use(authGate); // from here on a valid session cookie or Bearer ADMIN_TOKEN is required (once an account or ADMIN_TOKEN exists)
 router.use('/account', accountRouter);
 
@@ -229,5 +230,8 @@ router.get('/dashboard', (_req, res) => {
     horizonHours: store.getSettings().horizonHours,
   });
 });
+
+// Unknown /api paths are a JSON 404 (never the SPA's index.html).
+router.use((_req, res) => res.status(404).json({ error: 'not found' }));
 
 export default router;

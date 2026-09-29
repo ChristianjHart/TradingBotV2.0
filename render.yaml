@@ -11,7 +11,8 @@ services:
         value: "22"
       - key: NODE_ENV
         value: production
-      # Render terminates TLS in front of the app: required so rate limiting keys on the real client IP.
+      # Render terminates TLS in front of the app: REQUIRED so rate limiting / login throttling key on the real client IP
+      # (without it every visitor shares one bucket, so a spray from anywhere throttles everyone).
       - key: TRUST_PROXY
         value: "true"
       - key: USE_MOCK_DATA
@@ -31,7 +32,8 @@ services:
       - key: APP_SECRET
         generateValue: true
       # Secrets: set these in the Render dashboard (never commit values).
-      # SIGNUP_CODE: required to create the owner account (open the site after deploy, sign up with this code). SET IT.
+      # SIGNUP_CODE: REQUIRED. Until an account exists the API answers 503 setup_required (fail closed), and the owner account can only be
+      # created with this code (open the site after deploy, sign up with it). Use a long random secret. SET IT BEFORE FIRST OPEN.
       - key: SIGNUP_CODE
         sync: false
       # ADMIN_TOKEN (optional): Bearer token for scripts; also accepted as the signup code when SIGNUP_CODE is unset.
@@ -44,6 +46,9 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      # SUPABASE_*: STRONGLY RECOMMENDED. The free-plan disk is ephemeral: without Supabase every restart/redeploy forgets the owner
+      # account, stored API keys and logged-out sessions (the app then fails closed to setup mode and you must sign up again).
+      # Run supabase/migrations/001..004 in the Supabase SQL editor.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

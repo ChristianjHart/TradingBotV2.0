@@ -26,6 +26,7 @@ function writeFile(rows) {
 }
 
 let users = readFile();
+let restoreState = supabaseEnabled ? 'pending' : 'ok';
 const clone = (u) => (u ? structuredClone(u) : null);
 
 async function mirror(row) {
@@ -66,26 +67,51 @@ export const usersRepo = {
     return clone(row);
   },
 
-  /** Boot: Supabase is the source of truth when it has rows (Render's disk is ephemeral); otherwise push local rows up. */
-  async restoreFromSupabase() {
+  /**
+   * 'ok' | 'pending' (Supabase restore still running at boot) | 'failed' (every attempt failed). While not 'ok' and no
+   * local account exists, signup is refused so a transient Supabase outage can never let someone claim a fresh owner
+   * account next to the real one that is merely unreachable.
+   */
+  get restoreState() {
+    return restoreState;
+  },
+
+  /**
+   * Boot: Supabase is the source of truth when it has rows (Render's disk is ephemeral); otherwise push local rows up.
+   * Retries with exponential backoff (a transient Supabase blip must not be mistaken for "no account").
+   */
+  async restoreFromSupabase({ attempts = 4, baseDelayMs = 500 } = {}) {
     if (!supabaseEnabled) return false;
-    try {
-      const rows = await select('app_users', 'select=*&order=created_at.asc');
-      if (rows.length) {
-        users = rows;
-        writeFile(users);
-        return true;
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        const rows = await select('app_users', 'select=*&order=created_at.asc');
+        restoreState = 'ok';
+        if (rows.length) {
+          users = rows;
+          writeFile(users);
+          console.log(`[users] restored ${rows.length} account(s) from Supabase`);
+          return true;
+        }
+        for (const u of users) await mirror(u);
+        console.log(`[users] Supabase has no accounts yet (${users.length} local account(s) pushed up)`);
+        return false;
+      } catch (err) {
+        console.warn(`[users] restore from Supabase failed (attempt ${i}/${attempts}): ${err.message}`);
+        if (i < attempts) await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** (i - 1)));
       }
-      for (const u of users) await mirror(u);
-    } catch (err) {
-      console.warn(`[users] restore from Supabase failed (using local file): ${err.message}`);
     }
+    restoreState = 'failed';
+    console.error(
+      `[users] ERROR: could not restore accounts from Supabase after ${attempts} attempts. Using the local file (${users.length} account(s)). ` +
+        (users.length ? '' : 'No account is known: sign-up is refused and the API stays closed until the server is restarted with Supabase reachable.'),
+    );
     return false;
   },
 
   /** Test hook: forget everything (memory + file). */
   _reset() {
     users = [];
+    restoreState = 'ok';
     writeFile(users);
   },
 };

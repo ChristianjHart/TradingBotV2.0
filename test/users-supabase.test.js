@@ -10,6 +10,7 @@ const realFetch = globalThis.fetch;
 const posts = []; // { table, body }
 let tableRows = { app_users: [] };
 let failUsers = false;
+let failSelects = 0; // next N GETs of app_users answer 503
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   if (u.startsWith('http://127.0.0.1')) return realFetch(url, opts);
@@ -19,6 +20,10 @@ globalThis.fetch = async (url, opts = {}) => {
       posts.push({ table, body: String(opts.body) });
       if (table === 'app_users' && failUsers) return new Response('down', { status: 503 });
       return new Response('', { status: 201 });
+    }
+    if (table === 'app_users' && failSelects > 0) {
+      failSelects--;
+      return new Response('down', { status: 503 });
     }
     return Response.json(tableRows[table] || []);
   }
@@ -105,4 +110,36 @@ test('a failing Supabase write keeps the local file and queues a retry; restore 
   assert.equal(usersRepo.owner().email, 'remote@example.com');
   applyOwnerCredentials();
   assert.equal(config.openrouter.key, 'sk-or-restored-key-1234');
+});
+
+test('boot restore retries with backoff before concluding there is no account; a total failure fails closed', async () => {
+  const warn = console.warn;
+  const err = console.error;
+  console.warn = () => {};
+  console.error = () => {};
+  try {
+    usersRepo._reset();
+    tableRows.app_users = [{ id: 'u9', email: 'kept@example.com', password_hash: 'scrypt$h', session_version: 0, keys_enc: null, models: null, created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-01T00:00:00Z' }];
+    failSelects = 2; // two transient failures, third attempt succeeds
+    assert.equal(await usersRepo.restoreFromSupabase({ attempts: 4, baseDelayMs: 1 }), true);
+    assert.equal(usersRepo.restoreState, 'ok');
+    assert.equal(usersRepo.owner().email, 'kept@example.com');
+
+    // every attempt fails and no local account: state 'failed', signup refused with 503 (no second owner next to the unreachable one)
+    usersRepo._reset();
+    failSelects = 99;
+    assert.equal(await usersRepo.restoreFromSupabase({ attempts: 3, baseDelayMs: 1 }), false);
+    assert.equal(usersRepo.restoreState, 'failed');
+    assert.equal(failSelects, 96); // exactly 3 attempts
+    const r = await call('POST', '/auth/signup', { email: 'new@example.com', password: 'a-Perfectly-Fine-Passphrase-7' });
+    assert.equal(r.status, 503);
+    assert.equal((await r.json()).code, 'accounts_unavailable');
+    assert.equal(usersRepo.count(), 0);
+  } finally {
+    failSelects = 0;
+    console.warn = warn;
+    console.error = err;
+    usersRepo._reset();
+    tableRows.app_users = [];
+  }
 });

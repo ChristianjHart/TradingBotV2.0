@@ -3,17 +3,28 @@ import { decide401 } from './auth-logic.js';
 const API = '/api';
 const TOKEN_KEY = 'tb_admin_token';
 
-export function getToken() {
+// The legacy admin token lives in sessionStorage (tab-scoped, gone when the tab closes), not localStorage: an XSS or another
+// tab/profile session cannot pick it up later. Any token an older version left in localStorage is deleted on first use.
+function dropLegacyToken() {
   try {
-    return localStorage.getItem(TOKEN_KEY) || '';
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+export function getToken() {
+  dropLegacyToken();
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) || '';
   } catch {
     return '';
   }
 }
 export function setToken(t) {
+  dropLegacyToken();
   try {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage unavailable */
   }
@@ -31,7 +42,12 @@ let sessionEndedHandler = null;
 export function onSessionEnded(fn) {
   sessionEndedHandler = fn;
 }
-/** 'session' | 'token' | 'none' | null (unknown) — set from GET /api/auth/status. */
+/** Registered by the auth module: called when any request gets 503 setup_required (fresh production server, no account yet). */
+let setupRequiredHandler = null;
+export function onSetupRequired(fn) {
+  setupRequiredHandler = fn;
+}
+/** 'session' | 'token' | 'setup' | | 'none' | null (unknown) — set from GET /api/auth/status. */
 let authMode = null;
 export function setAuthMode(m) {
   authMode = m || null;
@@ -88,6 +104,19 @@ export async function api(path, options = {}) {
     } else if (action === 'login' && sessionEndedHandler) {
       try {
         sessionEndedHandler();
+      } catch {
+        /* handler must never break the request flow */
+      }
+    }
+  }
+  if (res.status === 503 && !skipAuthRedirect) {
+    errBody = await res
+      .clone()
+      .json()
+      .catch(() => ({}));
+    if (errBody?.code === 'setup_required' && setupRequiredHandler) {
+      try {
+        setupRequiredHandler(errBody.error || '');
       } catch {
         /* handler must never break the request flow */
       }

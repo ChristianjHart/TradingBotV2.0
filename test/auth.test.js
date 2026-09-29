@@ -11,7 +11,8 @@ const { alpaca } = await import('../server/services/alpaca.js');
 const { store } = await import('../server/db/store.js');
 const { scheduledRunSkipReason } = await import('../server/services/jobs.js');
 const { applyOwnerCredentials } = await import('../server/auth/accounts.js');
-const { loginByIp, loginByEmail, signupByIp } = await import('../server/routes/auth.js');
+const AR = await import('../server/routes/auth.js');
+const { loginByIp, loginByPair, loginEmailDelay, signupByIp, signupGlobal, passwordBySession, resetAuthLimiters } = AR;
 const C = await import('../server/auth/crypto.js');
 const { isLoopback, signupState } = await import('../server/auth/policy.js');
 const { AttemptLimiter } = await import('../server/auth/index.js');
@@ -55,9 +56,9 @@ async function signup(email = 'owner@example.com', extra = {}) {
 
 beforeEach(() => {
   usersRepo._reset();
-  loginByIp.clear();
-  loginByEmail.clear();
-  signupByIp.clear();
+  resetAuthLimiters();
+  Object.assign(loginEmailDelay, { baseMs: 1, maxMs: 5 }); // keep the escalating delay negligible in tests
+  config.trustProxy = false;
   config.adminToken = '';
   process.env.APP_SECRET = 'test-app-secret-0123456789abcdef';
   delete process.env.SIGNUP_CODE;
@@ -94,9 +95,10 @@ test('first-run signup without a code: loopback only; proxied/remote clients get
   assert.match(ok.setCookie, /SameSite=Lax/);
   assert.match(ok.setCookie, /Max-Age=1209600/);
   assert.doesNotMatch(ok.setCookie, /Secure/); // plain http
-  assert.equal(isLoopback({ socket: { remoteAddress: '127.0.0.1' }, get: () => undefined }), true);
-  assert.equal(isLoopback({ socket: { remoteAddress: '10.0.0.5' }, get: () => undefined }), false);
-  assert.equal(isLoopback({ socket: { remoteAddress: '::1' }, get: (h) => (h === 'x-forwarded-for' ? '1.2.3.4' : undefined) }), false);
+  const lb = (addr, headers = { host: 'localhost:3000' }) => ({ socket: { remoteAddress: addr }, get: (h) => headers[h] });
+  assert.equal(isLoopback(lb('127.0.0.1')), true);
+  assert.equal(isLoopback(lb('10.0.0.5')), false);
+  assert.equal(isLoopback(lb('::1', { host: '[::1]:3000', 'x-forwarded-for': '1.2.3.4' })), false);
 });
 
 test('signup with SIGNUP_CODE: code required (constant-time compare), wrong code 403, ADMIN_TOKEN is the fallback code', async () => {
@@ -179,9 +181,9 @@ test('login lockout: 10 failures then 429 with Retry-After, even for the right p
   assert.equal(locked.status, 429);
   assert.ok(Number(locked.headers.get('retry-after')) > 0);
   assert.equal(locked.body.code, 'rate_limited');
-  // per-email limiter alone (different IP key) also locks
-  loginByIp.clear();
-  assert.equal((await call('POST', '/auth/login', { body: { email: 'owner@example.com', password: PW } })).status, 429);
+  // ...but the lock is per (email, IP) pair: another address is not affected
+  config.trustProxy = true;
+  assert.equal((await call('POST', '/auth/login', { body: { email: 'owner@example.com', password: PW }, headers: { 'x-forwarded-for': '203.0.113.7' } })).status, 200);
 });
 
 test('AttemptLimiter: lockout doubles and success clears', () => {
@@ -521,7 +523,7 @@ test('scheduled runs skip with a logged reason when no credentials exist', () =>
 });
 
 test('signupState policy helper', () => {
-  const req = (addr) => ({ socket: { remoteAddress: addr }, get: () => undefined });
+  const req = (addr) => ({ socket: { remoteAddress: addr }, get: (h) => (h === 'host' ? 'localhost:3000' : undefined) });
   assert.equal(signupState(req('8.8.8.8')).open, false);
   assert.equal(signupState(req('127.0.0.1')).open, true);
   process.env.SIGNUP_CODE = 'abc';

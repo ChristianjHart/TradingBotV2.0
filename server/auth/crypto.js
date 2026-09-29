@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
+import { passwordRuleProblem } from '../../public/js/password-rules.js';
 
 const scrypt = promisify(crypto.scrypt);
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
@@ -39,23 +40,13 @@ export async function dummyVerify(password) {
   return false;
 }
 
-const COMMON = new Set([
-  'password12', 'password123', 'password1234', 'password12345', 'passw0rd123', 'p@ssword123', 'qwertyuiop', 'qwerty12345', 'qwerty123456',
-  '1234567890', '12345678910', '123456789012', '0123456789', '0987654321', '1q2w3e4r5t', 'iloveyou12', 'iloveyou123', 'letmein123', 'letmein1234',
-  'welcome123', 'welcome1234', 'admin12345', 'administrator', 'abc1234567', 'abcdefghij', 'trustno1234', 'changeme123', 'changemenow', 'monkey12345',
-  'dragon12345', 'football123', 'baseball123', 'superman123', 'trading123', 'tradingbot', 'tradingbot1', 'tradingbot123', 'zaq12wsxcde3',
-]);
-
-/** Returns an error message, or null when the password is acceptable. */
+/**
+ * Returns an error message, or null when the password is acceptable: 10-200 chars, not on the embedded common-password
+ * blocklist, no repeating / sequential / keyboard patterns, and it must not contain the email's local part.
+ * The rules live in public/js/password-rules.js so the browser's strength meter applies the same checks.
+ */
 export function passwordProblem(password, email = '') {
-  if (typeof password !== 'string') return 'password is required';
-  if (password.length < 10) return 'password must be at least 10 characters';
-  if (password.length > 200) return 'password is too long (max 200 characters)';
-  const lower = password.toLowerCase();
-  if (COMMON.has(lower) || /^(.)\1+$/.test(password) || lower === String(email).toLowerCase() || new Set(password).size < 4) {
-    return 'that password is too common or too simple; choose a longer, less predictable one';
-  }
-  return null;
+  return passwordRuleProblem(password, email);
 }
 
 export function normalizeEmail(email) {
@@ -121,13 +112,16 @@ export function verifyToken(token, secret = signingSecret()) {
   if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) return null;
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    return p && typeof p.uid === 'string' && Number.isInteger(p.sv) && Number(p.exp) > Math.floor(Date.now() / 1000) ? p : null;
+    // sid (random per session) is required: tokens without one (pre-revocation cookies) are simply invalid and force a fresh login.
+    return p && typeof p.uid === 'string' && typeof p.sid === 'string' && p.sid.length >= 16 && Number.isInteger(p.sv) && Number(p.exp) > Math.floor(Date.now() / 1000) ? p : null;
   } catch {
     return null;
   }
 }
 
-export const issueToken = (user) => signToken({ uid: user.id, sv: user.session_version || 0, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S });
+/** New session token: {uid, sv (account-wide version), sid (this session, revocable on logout), exp}. */
+export const issueToken = (user) =>
+  signToken({ uid: user.id, sv: user.session_version || 0, sid: crypto.randomBytes(16).toString('base64url'), exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S });
 
 export function parseCookies(header) {
   const out = {};

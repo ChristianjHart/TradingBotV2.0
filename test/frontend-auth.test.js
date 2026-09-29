@@ -13,7 +13,8 @@ test('email validation accepts normal addresses and rejects junk', () => {
 
 test('password minimum length is 10', () => {
   assert.match(validatePassword('123456789'), /at least 10/);
-  assert.equal(validatePassword('1234567890a'), null);
+  assert.equal(validatePassword('correct-horse-9'), null);
+  assert.ok(validatePassword('1234567890a')); // sequential
   assert.match(validatePassword('x'.repeat(201)), /too long/);
 });
 

@@ -1,11 +1,16 @@
 import { store } from './store.js';
 import { select, supabaseEnabled } from './supabase.js';
 import { usersRepo } from './users.js';
+import { sessionsRepo } from './sessions.js';
 
 /** Render's disk is ephemeral: on boot, restore positions, runs, equity, picks from Supabase if local files are empty. */
 export async function hydrateFromSupabase() {
   if (!supabaseEnabled) return;
-  await usersRepo.restoreFromSupabase(); // accounts first: their keys become the active credentials
+  await usersRepo.restoreFromSupabase(); // accounts first: their keys become the active credentials (retries with backoff)
+  if (usersRepo.restoreState === 'failed') {
+    store.addLog({ level: 'error', message: 'accounts could not be restored from Supabase after several attempts; sign-up stays closed and (in production) the API stays closed until a restart with Supabase reachable' });
+  }
+  await sessionsRepo.restoreFromSupabase(); // logged-out session ids
   try {
     if (!store.getPositions().length) {
       const rows = await select('positions', 'select=raw&order=opened_at.desc&limit=1000');

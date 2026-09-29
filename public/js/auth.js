@@ -1,5 +1,5 @@
-import { api, escapeHtml as esc, onSessionEnded, setAuthMode } from './api.js';
-import { authErrorMessage, canSignUp, initialAuthView, needsAuthScreen, passwordStrength, retryAfterSeconds, shortEmail, validateLogin, validateSignup } from './auth-logic.js';
+import { api, escapeHtml as esc, onSessionEnded, onSetupRequired, setAuthMode } from './api.js';
+import { authErrorMessage, canSignUp, initialAuthView, isSetupMode, needsAuthScreen, passwordStrength, retryAfterSeconds, shortEmail, validateLogin, validateSignup } from './auth-logic.js';
 import { barsCache, destroyCharts, root, state } from './state.js';
 import { toast } from './ui.js';
 
@@ -22,6 +22,7 @@ export async function loadAuthStatus() {
       setupRequired: !!s.setupRequired,
       signupOpen: !!s.signupOpen,
       signupNeedsCode: !!s.signupNeedsCode,
+      guidance: typeof s.guidance === 'string' ? s.guidance : '',
     });
     setAuthMode(state.auth.mode);
     return s;
@@ -89,6 +90,18 @@ function unlock() {
 export function initAuth(cb) {
   onUnlock = cb.onUnlock;
   onSessionEnded(() => lock('Your session has ended — sign in to continue.'));
+  // Any call answered 503 setup_required (fresh production server, no account): same screen as the boot-time gate, with the server's guidance.
+  onSetupRequired(async (message) => {
+    await loadAuthStatus();
+    if (!isSetupMode(state.auth)) state.auth.mode = 'setup';
+    view = 'signup';
+    if (message) state.auth.guidance = message; // the server's own guidance (names the env var to set), shown in the form
+    if (state.locked) {
+      mountScreen('');
+      return;
+    }
+    lock('');
+  });
 }
 
 /** Boot-time decision: show the auth screen or let the app start. Returns true when the app may start. */
@@ -97,7 +110,7 @@ export async function gate() {
   if (!s) return true;
   if (needsAuthScreen(state.auth)) {
     view = initialAuthView(state.auth);
-    lock(state.auth.setupRequired ? 'Welcome — create the owner account to get started.' : '');
+    lock(isSetupMode(state.auth) ? '' : state.auth.setupRequired ? 'Welcome — create the owner account to get started.' : '');
     return false;
   }
   updateAccountChrome();
@@ -129,6 +142,7 @@ export function openSignup() {
 
 /** Leave the auth screen and keep using the open dashboard (only offered while no login is enforced). */
 export function continueWithoutAccount() {
+  if (isSetupMode(state.auth)) return; // fail-closed setup: the account must be created first
   unlock();
 }
 
@@ -168,6 +182,7 @@ function signinHtml() {
 function signupHtml() {
   const a = state.auth;
   return `<form id="f-signup" novalidate aria-labelledby="auth-h">
+    ${isSetupMode(a) && a.guidance ? `<p class="auth-note" id="setup-guidance" role="note">${esc(a.guidance)}</p>` : ''}
     <p class="auth-note">${a.setupRequired ? 'No account exists yet. <strong>The first account becomes the owner</strong> of this dashboard and holds its API keys.' : 'This dashboard has a single owner account. Creating one requires the setup code configured on the server.'}</p>
     ${field({ id: 'su-email', label: 'Email', type: 'email', auto: 'username', extra: 'required', inputmode: 'email' })}
     ${field({ id: 'su-pw', label: 'Password', type: 'password', auto: 'new-password', extra: 'required minlength="10"', pw: true, hint: 'At least 10 characters. A long passphrase is best.' })}
@@ -205,7 +220,7 @@ function mountScreen(reason) {
           ? '<button type="button" class="linklike" id="auth-toggle">Need an account? Create one</button>'
           : '<span class="auth-note">Accounts are closed. To allow creating one, the server owner must set <code>SIGNUP_CODE</code> in the server environment and restart.</span>'
     }</div>
-    ${state.auth.mode !== 'session' ? '<div class="auth-alt"><button type="button" class="linklike" id="auth-skip">Continue without an account (open dashboard)</button></div>' : ''}
+    ${state.auth.mode !== 'session' && !isSetupMode(state.auth) ? '<div class="auth-alt"><button type="button" class="linklike" id="auth-skip">Continue without an account (open dashboard)</button></div>' : ''}
   </main>`;
   wire();
   const first = screen.querySelector('input');
@@ -329,7 +344,7 @@ function wire() {
   if (su) {
     const pw = $('su-pw');
     pw.addEventListener('input', () => {
-      const s = passwordStrength(pw.value);
+      const s = passwordStrength(pw.value, $('su-email')?.value.trim() || '');
       const box = $('su-strength');
       box.dataset.score = String(s.score);
       $('su-strength-txt').textContent = s.label ? `${s.label}. ${s.hint}` : s.hint;

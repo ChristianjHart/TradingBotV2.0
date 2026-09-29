@@ -5,14 +5,34 @@ import { usersRepo } from '../db/users.js';
 import { asyncHandler, clientKey } from '../middleware.js';
 import { loggedFetch } from '../services/http.js';
 import { hashPassword, verifyPassword, dummyVerify, passwordProblem, normalizeEmail } from '../auth/crypto.js';
-import { AttemptLimiter, requireUser, setSessionCookie, clearSessionCookie } from '../auth/index.js';
-import { accountExists, authRequired, signupState, codeMatches, isLoopback } from '../auth/policy.js';
+import { AttemptLimiter, DelayTracker, requireUser, setSessionCookie, clearSessionCookie, cookieToken } from '../auth/index.js';
+import { sessionsRepo } from '../db/sessions.js';
+import { accountExists, authRequired, signupState, codeMatches, isLoopback, setupRequired, setupGuidance } from '../auth/policy.js';
 import { accountSummary, saveKeys, saveModels } from '../auth/accounts.js';
 
-// Brute-force protection: per client IP and per email (10 failures / 10 min, then a doubling lockout).
-export const loginByIp = new AttemptLimiter({ max: 10, windowMs: 10 * 60_000 });
-export const loginByEmail = new AttemptLimiter({ max: 10, windowMs: 10 * 60_000 });
+// Brute-force protection (all in-memory: a process restart clears every counter and lock; locks are also always temporary).
+//  - loginByPair: failures per (email, client IP) PAIR: 10 / 10 min, then a doubling lock capped at 15 min. It is never keyed by
+//    email alone, so someone who merely knows the owner's email cannot lock the owner out from a different address.
+//  - loginByIp: password-spray guard, much higher (60 failures / 10 min across all emails), lock capped at 10 min.
+//  - loginEmailDelay: failures for one email from ANY address only add a growing DELAY (250 ms doubling, max 5 s) to that
+//    email's login attempts; it never rejects, so the correct password still succeeds from a fresh IP during an attack.
+//  - passwordBySession: /auth/password guesses are counted per (user id, session id), so login noise never blocks a live session.
+//  - signupByIp / signupGlobal: wrong sign-up codes, per IP and in total (a botnet cannot brute-force SIGNUP_CODE).
+export const loginByPair = new AttemptLimiter({ max: 10, windowMs: 10 * 60_000, lockMs: 60_000, maxLockMs: 15 * 60_000, maxKeys: 20_000 });
+export const loginByIp = new AttemptLimiter({ max: 60, windowMs: 10 * 60_000, lockMs: 60_000, maxLockMs: 10 * 60_000 });
+export const loginEmailDelay = new DelayTracker({ free: 3, baseMs: 250, maxMs: 5000 });
+export const passwordBySession = new AttemptLimiter({ max: 10, windowMs: 10 * 60_000, lockMs: 60_000, maxLockMs: 15 * 60_000 });
 export const signupByIp = new AttemptLimiter({ max: 10, windowMs: 10 * 60_000 });
+export const signupGlobal = new AttemptLimiter({ max: 30, windowMs: 60 * 60_000, lockMs: 5 * 60_000, maxLockMs: 30 * 60_000, maxKeys: 4 });
+const loginInflight = new Map(); // ip -> concurrent login attempts (a burst cannot slip past the counters while verifications are pending)
+const MAX_INFLIGHT = 8;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Test hook: forget every limiter. */
+export function resetAuthLimiters() {
+  for (const l of [loginByPair, loginByIp, loginEmailDelay, passwordBySession, signupByIp, signupGlobal]) l.clear();
+  loginInflight.clear();
+}
 
 const tooMany = (res, seconds) => {
   res.set('Retry-After', String(seconds));
@@ -25,13 +45,15 @@ export const accountRouter = Router();
 authRouter.get('/status', (req, res) => {
   const s = signupState(req);
   const exists = accountExists();
+  const setup = setupRequired();
   res.json({
-    required: authRequired(),
+    required: authRequired() || setup,
     setupRequired: !exists,
     signupOpen: s.open,
     signupNeedsCode: s.needsCode,
-    mode: exists ? 'session' : config.adminToken ? 'token' : 'none',
+    mode: setup ? 'setup' : exists ? 'session' : config.adminToken ? 'token' : 'none',
     user: req.auth?.user ? { email: req.auth.user.email } : null,
+    ...(setup ? { guidance: setupGuidance() } : {}),
   });
 });
 
@@ -47,11 +69,16 @@ authRouter.post('/signup', asyncHandler(async (req, res) => {
       code: 'signup_disabled',
     });
   }
-  const wait = signupByIp.retryAfter(ip);
+  if (!accountExists() && usersRepo.restoreState !== 'ok') {
+    // Supabase account restore pending/failed: the "no account" state may be a false negative; never mint a second owner.
+    return res.status(503).json({ error: setupGuidance(), code: 'accounts_unavailable' });
+  }
+  const wait = Math.max(signupByIp.retryAfter(ip), s.needsCode ? signupGlobal.retryAfter('all') : 0);
   if (wait) return tooMany(res, wait);
   const { email: rawEmail, password, code } = req.body || {};
   if (s.needsCode && !codeMatches(code)) {
     signupByIp.fail(ip);
+    signupGlobal.fail('all');
     return res.status(403).json({ error: 'invalid sign-up code', code: 'invalid_signup_code' });
   }
   const email = normalizeEmail(rawEmail);
@@ -76,22 +103,39 @@ authRouter.post('/login', asyncHandler(async (req, res) => {
   const ip = clientKey(req);
   const { email: rawEmail, password } = req.body || {};
   const email = normalizeEmail(rawEmail) || String(rawEmail ?? '').slice(0, 254).toLowerCase();
-  const wait = Math.max(loginByIp.retryAfter(ip), loginByEmail.retryAfter(email));
+  const pair = `${email}|${ip}`;
+  const wait = Math.max(loginByPair.retryAfter(pair), loginByIp.retryAfter(ip));
   if (wait) return tooMany(res, wait);
-  const user = typeof password === 'string' && password.length <= 200 ? usersRepo.getByEmail(email) : null;
-  const ok = user ? await verifyPassword(password, user.password_hash) : await dummyVerify(String(password ?? '').slice(0, 200));
-  if (!ok) {
-    loginByIp.fail(ip);
-    loginByEmail.fail(email);
-    store.addLog({ level: 'warn', message: 'auth: failed login attempt' });
-    return res.status(401).json({ error: 'invalid email or password', code: 'invalid_credentials' });
+  if ((loginInflight.get(ip) || 0) >= MAX_INFLIGHT) return tooMany(res, 1);
+  loginInflight.set(ip, (loginInflight.get(ip) || 0) + 1);
+  try {
+    const delay = loginEmailDelay.delayMs(email);
+    if (delay) await sleep(delay); // pressure on this email from anywhere slows every attempt for it, but never blocks the right password
+    const user = typeof password === 'string' && password.length <= 200 ? usersRepo.getByEmail(email) : null;
+    const ok = user ? await verifyPassword(password, user.password_hash) : await dummyVerify(String(password ?? '').slice(0, 200));
+    if (!ok) {
+      loginByPair.fail(pair);
+      loginByIp.fail(ip);
+      loginEmailDelay.fail(email);
+      store.addLog({ level: 'warn', message: 'auth: failed login attempt' });
+      return res.status(401).json({ error: 'invalid email or password', code: 'invalid_credentials' });
+    }
+    loginByPair.success(pair);
+    loginEmailDelay.success(email);
+    setSessionCookie(req, res, user);
+    res.json({ ok: true, user: { email: user.email } });
+  } finally {
+    const n = (loginInflight.get(ip) || 1) - 1;
+    if (n > 0) loginInflight.set(ip, n);
+    else loginInflight.delete(ip);
   }
-  loginByEmail.success(email);
-  setSessionCookie(req, res, user);
-  res.json({ ok: true, user: { email: user.email } });
 }));
 
+// Logout revokes THIS session server-side (its random sid is remembered until the token would have expired); other
+// sessions of the same account stay valid. /auth/logout-all still bumps session_version to end every session.
 authRouter.post('/logout', (req, res) => {
+  const tok = cookieToken(req);
+  if (tok) sessionsRepo.revoke(tok.sid, tok.exp, tok.uid);
   clearSessionCookie(req, res);
   res.json({ ok: true });
 });
@@ -103,20 +147,23 @@ authRouter.post('/logout-all', requireUser, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// A live session is not subject to the login limiters (an attacker hammering the login form cannot block the owner here);
+// guesses of the current password are only counted against this very (user, session).
 authRouter.post('/password', requireUser, asyncHandler(async (req, res) => {
   const { current, next } = req.body || {};
   const user = req.auth.user;
-  const wait = loginByEmail.retryAfter(user.email);
+  const key = `${user.id}:${req.auth.sid}`;
+  const wait = passwordBySession.retryAfter(key);
   if (wait) return tooMany(res, wait);
   if (typeof current !== 'string' || current.length > 200 || !(await verifyPassword(current, user.password_hash))) {
-    loginByEmail.fail(user.email);
+    passwordBySession.fail(key);
     return res.status(401).json({ error: 'current password is incorrect', code: 'invalid_credentials' });
   }
   const problem = passwordProblem(next, user.email);
   if (problem) return res.status(400).json({ error: problem, code: 'weak_password' });
   const updated = await usersRepo.update(user.id, { password_hash: await hashPassword(next), session_version: (user.session_version || 0) + 1 });
-  loginByEmail.success(user.email);
-  setSessionCookie(req, res, updated); // this session survives; every other one is invalidated
+  passwordBySession.success(key);
+  setSessionCookie(req, res, updated); // this session survives (new sid); every other one is invalidated
   store.addLog({ level: 'info', message: 'auth: password changed' });
   res.json({ ok: true });
 }));

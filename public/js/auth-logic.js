@@ -1,7 +1,8 @@
 /* Pure, DOM-free auth/account logic (unit-tested in test/frontend-auth.test.js). Never handles or logs secrets beyond validating shape. */
 
+import { passwordRuleProblem } from './password-rules.js';
+
 export const MIN_PASSWORD = 10;
-const COMMON = ['password', 'passw0rd', '1234567890', 'qwertyuiop', 'letmein', 'iloveyou', 'administrator', 'tradingbot'];
 
 export function isValidEmail(email) {
   const e = String(email ?? '').trim();
@@ -9,12 +10,13 @@ export function isValidEmail(email) {
 }
 
 /** Strength 0-4 with a short hint. Length is the main factor; a short password can never score above 1. */
-export function passwordStrength(pw) {
+export function passwordStrength(pw, email = '') {
   const p = String(pw ?? '');
   if (!p) return { score: 0, label: '', hint: `Use at least ${MIN_PASSWORD} characters.` };
   if (p.length < MIN_PASSWORD) return { score: 1, label: 'Too short', hint: `${MIN_PASSWORD - p.length} more character${MIN_PASSWORD - p.length === 1 ? '' : 's'} needed (minimum ${MIN_PASSWORD}).` };
-  const lower = p.toLowerCase();
-  if (COMMON.some((c) => lower.includes(c)) || /^(.)\1+$/.test(p)) return { score: 1, label: 'Too common', hint: 'Avoid common words and repeated characters.' };
+  // Same rules as the server (shared module): blocklist, repeats, sequences / keyboard walks, email name.
+  const problem = passwordRuleProblem(p, email);
+  if (problem) return { score: 1, label: 'Too common', hint: `${problem.charAt(0).toUpperCase()}${problem.slice(1)}.` };
   const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
   let score = 2;
   if (p.length >= 14 && classes >= 2) score = 3;
@@ -24,18 +26,19 @@ export function passwordStrength(pw) {
   return { score, label, hint: score >= 3 ? 'Nice — hard to guess.' : 'Longer passphrases or mixing character types make it stronger.' };
 }
 
-export function validatePassword(pw) {
+export function validatePassword(pw, email = '') {
   const p = String(pw ?? '');
   if (p.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters.`;
   if (p.length > 200) return 'Password is too long (200 characters max).';
-  return null;
+  const problem = passwordRuleProblem(p, email);
+  return problem ? `${problem.charAt(0).toUpperCase()}${problem.slice(1)}.` : null;
 }
 
 /** Returns {field: message} — empty object when valid. */
 export function validateSignup({ email, password, confirm, code }, { needsCode = false } = {}) {
   const errs = {};
   if (!isValidEmail(email)) errs.email = 'Enter a valid email address.';
-  const pe = validatePassword(password);
+  const pe = validatePassword(password, email);
   if (pe) errs.password = pe;
   else if (password !== confirm) errs.confirm = 'Passwords do not match.';
   if (needsCode && !String(code ?? '').trim()) errs.code = 'Enter the setup code (SIGNUP_CODE) configured on the server.';
@@ -49,10 +52,10 @@ export function validateLogin({ email, password }) {
   return errs;
 }
 
-export function validatePasswordChange({ current, next, confirm }) {
+export function validatePasswordChange({ current, next, confirm }, email = '') {
   const errs = {};
   if (!current) errs.current = 'Enter your current password.';
-  const pe = validatePassword(next);
+  const pe = validatePassword(next, email);
   if (pe) errs.next = pe;
   else if (next === current) errs.next = 'The new password must differ from the current one.';
   else if (next !== confirm) errs.confirm = 'Passwords do not match.';
@@ -143,6 +146,10 @@ export function authErrorMessage(err, context = 'generic') {
       return 'Server needs APP_SECRET before keys can be saved.';
     case 'login_required':
       return 'Your session has ended — please sign in again.';
+    case 'setup_required':
+      return e.message ? String(e.message) : 'Setup is not finished: create the owner account (the server owner must set SIGNUP_CODE first).';
+    case 'accounts_unavailable':
+      return e.message ? String(e.message) : 'Accounts are temporarily unavailable. Try again shortly.';
     case 'invalid_code':
     case 'invalid_signup_code':
       return 'That setup code is not correct.';
@@ -171,6 +178,7 @@ export function decide401({ code, mode, skipRedirect = false } = {}) {
 /** Should the SPA show the auth screen given GET /api/auth/status? */
 export function needsAuthScreen(status) {
   if (!status || typeof status !== 'object') return false;
+  if (status.mode === 'setup') return true; // fail-closed first run: the create-account screen, no way around it
   if (status.mode === 'session') return !status.user;
   return false;
 }
@@ -178,9 +186,12 @@ export function needsAuthScreen(status) {
 /** Which tab is offered first on the auth screen. */
 export function initialAuthView(status) {
   const s = status || {};
-  if (s.setupRequired) return 'signup';
+  if (s.mode === 'setup' || s.setupRequired) return 'signup';
   return 'signin';
 }
+
+/** Fail-closed first run (production, no account yet): the app may not be used without creating the account. */
+export const isSetupMode = (status) => !!status && status.mode === 'setup';
 
 export function canSignUp(status) {
   const s = status || {};
