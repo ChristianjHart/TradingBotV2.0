@@ -551,7 +551,7 @@ export class LineChart {
       ctx.stroke();
       ctx.restore();
       ctx.fillStyle = '#facc15';
-      ctx.fillText('start', w - padR + 4, y(this.baseline) - 4);
+      ctx.fillText('start', padL + 2, y(this.baseline) - 4);
       ctx.fillStyle = C.text;
     }
     const g = ctx.createLinearGradient(0, padT, 0, h - padB);

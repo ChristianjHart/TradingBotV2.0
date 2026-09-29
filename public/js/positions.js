@@ -2,7 +2,7 @@ import { api, clsPos, escapeHtml as esc, fmtDateTime, fmtDuration, fmtMoney, fmt
 import { CandleChart, aggregateBars } from './charts.js';
 import { refresh } from './data.js';
 import { drawMarketChart } from './market.js';
-import { hooks, $, EXIT_LABEL, barsCache, charts, empty, nowMs, setCls, setHtml, setText, skeleton, state } from './state.js';
+import { hooks, $, EXIT_LABEL, barsCache, charts, empty, nowMs, savePrefs, setCls, setHtml, setText, skeleton, state } from './state.js';
 import { confirmDialog, toast } from './ui.js';
 
 /* ---------- positions ---------- */
