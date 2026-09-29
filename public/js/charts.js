@@ -1,4 +1,15 @@
-/** Mini candlestick + indicator canvas chart */
+import { aggregateBars } from './run-logic.js';
+/** Canvas charts: candlesticks (crosshair/tooltip/markers/live line) and a simple line chart. */
+
+const C = {
+  bg: '#15171d',
+  grid: '#232730',
+  text: '#a6acb7',
+  up: '#22c55e',
+  down: '#ef4444',
+  ink: '#0b0c0e',
+  live: '#22d3ee',
+};
 
 function ema(values, period) {
   if (values.length < period) return values.map(() => null);
@@ -23,156 +34,526 @@ function sma(values, period) {
   return out;
 }
 
-export function drawCandleChart(canvas, bars, indicators = {}) {
-  if (!canvas || !bars?.length) return;
-  const ctx = canvas.getContext('2d');
+/** Aggregate hourly bars to 4H / 1D buckets (client-side; the API returns hourly bars). */
+export { aggregateBars };
+
+function fit(canvas) {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  const w = Math.max(50, rect.width);
+  const h = Math.max(50, rect.height);
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
 
-  const w = rect.width;
-  const h = rect.height;
-  const padL = 8;
-  const padR = 56;
-  const padT = 10;
-  const padB = indicators.vol ? 48 : 16;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
+function fmtP(v) {
+  const a = Math.abs(v);
+  return v.toFixed(a >= 1000 ? 1 : a >= 1 ? 2 : 4);
+}
+function fmtT(t) {
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? String(t) : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#15171d';
-  ctx.fillRect(0, 0, w, h);
+const escH = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function tableHtml(caption, heads, rows) {
+  return `<table><caption>${escH(caption)}</caption><thead><tr>${heads.map((h) => `<th scope="col">${escH(h)}</th>`).join('')}</tr></thead><tbody>${rows
+    .map((r) => `<tr>${r.map((v, i) => (i === 0 ? `<th scope="row">${escH(v)}</th>` : `<td>${escH(v)}</td>`)).join('')}</tr>`)
+    .join('')}</tbody></table>`;
+}
+function setTable(el, html) {
+  if (el && el.__h !== html) {
+    el.innerHTML = html;
+    el.__h = html;
+  }
+}
+const pctStr = (a, b) => (a ? `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%` : 'n/a');
 
-  const slice = bars.slice(-80);
-  const highs = slice.map((b) => b.h);
-  const lows = slice.map((b) => b.l);
-  const levels = indicators.levels || [];
-  let min = Math.min(...lows, ...levels.map((l) => l.price));
-  let max = Math.max(...highs, ...levels.map((l) => l.price));
-  const pad = (max - min) * 0.08 || 1;
-  min -= pad;
-  max += pad;
-
-  const closes = slice.map((b) => b.c);
-  const ema9 = indicators.ema9 ? ema(closes, 9) : null;
-  const ema21 = indicators.ema21 ? ema(closes, 21) : null;
-  const vwap = indicators.vwap ? sma(closes, Math.min(20, closes.length)) : null;
-
-  const xAt = (i) => padL + (i + 0.5) * (plotW / slice.length);
-  const yAt = (v) => padT + ((max - v) / (max - min)) * plotH;
-  const candleW = Math.max(2, (plotW / slice.length) * 0.65);
-
-  // grid
-  ctx.strokeStyle = '#1e2128';
+function tooltipBox(ctx, w, x, y, lines, padTop = 4) {
+  ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;
+  const th = lines.length * 14 + 8;
+  let bx = x + 12;
+  if (bx + tw > w - 4) bx = x - 12 - tw;
+  if (bx < 4) bx = 4;
+  const by = Math.max(padTop, y - th / 2);
+  ctx.fillStyle = 'rgba(11,12,14,0.94)';
+  ctx.strokeStyle = '#3a3f4b';
   ctx.lineWidth = 1;
-  for (let i = 0; i < 4; i++) {
-    const y = padT + (plotH / 3) * i;
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(w - padR, y);
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bx, by, tw, th, 4);
+  else ctx.rect(bx, by, tw, th);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#e8eaed';
+  ctx.textBaseline = 'top';
+  lines.forEach((l, i) => ctx.fillText(l, bx + 7, by + 5 + i * 14));
+  ctx.textBaseline = 'alphabetic';
+}
 
-  // candles
-  slice.forEach((b, i) => {
-    const x = xAt(i);
-    const up = b.c >= b.o;
-    ctx.strokeStyle = up ? '#22c55e' : '#ef4444';
-    ctx.fillStyle = up ? '#22c55e' : '#ef4444';
-    ctx.beginPath();
-    ctx.moveTo(x, yAt(b.h));
-    ctx.lineTo(x, yAt(b.l));
-    ctx.stroke();
-    const top = yAt(Math.max(b.o, b.c));
-    const bot = yAt(Math.min(b.o, b.c));
-    ctx.fillRect(x - candleW / 2, top, candleW, Math.max(1, bot - top));
-  });
-
-  function drawLine(series, color) {
-    if (!series) return;
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.4;
-    let started = false;
-    series.forEach((v, i) => {
-      if (v == null) return;
-      const x = xAt(i);
-      const y = yAt(v);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else ctx.lineTo(x, y);
+export class CandleChart {
+  constructor(canvas, { summaryEl, tableEl, tableBars = 20 } = {}) {
+    this.canvas = canvas;
+    this.summaryEl = summaryEl;
+    this.tableEl = tableEl;
+    this.tableBars = tableBars;
+    this.bars = [];
+    this.ind = {};
+    this.levels = [];
+    this.markers = [];
+    this.live = null;
+    this.hover = null;
+    this.title = '';
+    canvas.setAttribute('role', 'img');
+    canvas.tabIndex = 0;
+    this._draw = () => this.draw();
+    this.ro = new ResizeObserver(() => requestAnimationFrame(this._draw));
+    this.ro.observe(canvas.parentElement || canvas);
+    canvas.addEventListener('mousemove', (e) => this._move(e.clientX));
+    canvas.addEventListener('mouseleave', () => {
+      this.hover = null;
+      this.draw();
     });
-    ctx.stroke();
+    canvas.addEventListener('touchmove', (e) => e.touches[0] && this._move(e.touches[0].clientX), { passive: true });
+    canvas.addEventListener('keydown', (e) => {
+      if (!this.vis?.length) return;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const cur = this.hover ?? this.vis.length - 1;
+        this.hover = Math.min(this.vis.length - 1, Math.max(0, cur + (e.key === 'ArrowLeft' ? -1 : 1)));
+        this.draw();
+      } else if (e.key === 'Escape') {
+        this.hover = null;
+        this.draw();
+      }
+    });
+    canvas.addEventListener('blur', () => {
+      this.hover = null;
+      this.draw();
+    });
   }
 
-  drawLine(ema9, '#eab308');
-  drawLine(ema21, '#3b82f6');
-  drawLine(vwap, '#a855f7');
+  destroy() {
+    this.ro.disconnect();
+  }
 
-  // trade levels (entry / stop-loss / take-profit)
-  levels.forEach((l) => {
-    const y = yAt(l.price);
-    ctx.save();
-    ctx.setLineDash(l.dash ? [6, 4] : []);
-    ctx.strokeStyle = l.color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(w - padR, y);
-    ctx.stroke();
-    ctx.restore();
-    ctx.font = '10px IBM Plex Sans, sans-serif';
-    const text = `${l.label} ${l.price.toFixed(2)}`;
-    const tw = ctx.measureText(text).width + 8;
-    ctx.fillStyle = l.color;
-    ctx.fillRect(padL + 4, y - 14, tw, 13);
-    ctx.fillStyle = '#0b0c0e';
-    ctx.fillText(text, padL + 8, y - 4);
-  });
+  set({ bars, indicators, levels, markers, live, title }) {
+    if (bars) this.bars = bars;
+    if (indicators) this.ind = indicators;
+    if (levels) this.levels = levels;
+    if (markers) this.markers = markers;
+    if (live !== undefined) this.live = live;
+    if (title !== undefined) this.title = title;
+    this._table();
+    this.draw();
+  }
 
-  // volume
-  if (indicators.vol) {
-    const maxV = Math.max(...slice.map((b) => b.v));
-    const volH = 36;
-    const volTop = h - padB + 6;
+  /** Visually hidden data table of the last N bars (screen-reader alternative to the canvas). */
+  _table() {
+    if (!this.tableEl) return;
+    const rows = this.bars.slice(-this.tableBars);
+    setTable(
+      this.tableEl,
+      rows.length
+        ? tableHtml(`${this.title || 'Price'} — last ${rows.length} bars`, ['Time', 'Open', 'High', 'Low', 'Close', 'Volume'], rows.map((b) => [fmtT(b.t), fmtP(b.o), fmtP(b.h), fmtP(b.l), fmtP(b.c), Math.round(b.v || 0).toLocaleString()]))
+        : '',
+    );
+  }
+
+  _move(clientX) {
+    if (!this.geom || !this.vis?.length) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const i = Math.floor((clientX - rect.left - this.geom.padL) / (this.geom.plotW / this.vis.length));
+    const c = Math.min(this.vis.length - 1, Math.max(0, i));
+    if (c !== this.hover) {
+      this.hover = c;
+      this.draw();
+    }
+  }
+
+  draw() {
+    const canvas = this.canvas;
+    if (!canvas.isConnected) return;
+    const { ctx, w, h } = fit(canvas);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, w, h);
+    const slice = this.bars.slice(-80);
+    this.vis = slice;
+    if (!slice.length) {
+      ctx.fillStyle = C.text;
+      ctx.font = '12px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillText('No price data', 12, 24);
+      this._summary('No price data available.');
+      return;
+    }
+    const ind = this.ind;
+    const padL = 8;
+    const padR = 58;
+    const padT = 10;
+    const padB = ind.vol ? 48 : 20;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+    this.geom = { padL, plotW };
+
+    const extra = [...this.levels.map((l) => l.price), ...(this.live != null ? [this.live] : [])].filter(Number.isFinite);
+    let min = Math.min(...slice.map((b) => b.l), ...extra);
+    let max = Math.max(...slice.map((b) => b.h), ...extra);
+    const pad = (max - min) * 0.08 || 1;
+    min -= pad;
+    max += pad;
+    const closes = slice.map((b) => b.c);
+    const xAt = (i) => padL + (i + 0.5) * (plotW / slice.length);
+    const yAt = (v) => padT + ((max - v) / (max - min)) * plotH;
+    const cw = Math.max(2, (plotW / slice.length) * 0.65);
+
+    ctx.strokeStyle = C.grid;
+    ctx.lineWidth = 1;
+    ctx.fillStyle = C.text;
+    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    for (let i = 0; i < 4; i++) {
+      const y = padT + (plotH / 3) * i;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(w - padR, y);
+      ctx.stroke();
+      ctx.fillText(fmtP(max - ((max - min) / 3) * i), w - padR + 5, y + 3);
+    }
+
     slice.forEach((b, i) => {
       const x = xAt(i);
-      const vh = (b.v / maxV) * volH;
-      ctx.fillStyle = b.c >= b.o ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)';
-      ctx.fillRect(x - candleW / 2, volTop + volH - vh, candleW, vh);
+      const up = b.c >= b.o;
+      ctx.strokeStyle = ctx.fillStyle = up ? C.up : C.down;
+      ctx.beginPath();
+      ctx.moveTo(x, yAt(b.h));
+      ctx.lineTo(x, yAt(b.l));
+      ctx.stroke();
+      const top = yAt(Math.max(b.o, b.c));
+      ctx.fillRect(x - cw / 2, top, cw, Math.max(1, yAt(Math.min(b.o, b.c)) - top));
     });
+
+    const line = (series, color) => {
+      if (!series) return;
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.4;
+      let s = false;
+      series.forEach((v, i) => {
+        if (v == null) return;
+        if (!s) {
+          ctx.moveTo(xAt(i), yAt(v));
+          s = true;
+        } else ctx.lineTo(xAt(i), yAt(v));
+      });
+      ctx.stroke();
+    };
+    if (ind.ema9) line(ema(closes, 9), '#eab308');
+    if (ind.ema21) line(ema(closes, 21), '#3b82f6');
+    if (ind.vwap) line(sma(closes, Math.min(20, closes.length)), '#a855f7');
+
+    if (ind.vol) {
+      const maxV = Math.max(...slice.map((b) => b.v || 0)) || 1;
+      const volTop = h - padB + 6;
+      slice.forEach((b, i) => {
+        const vh = ((b.v || 0) / maxV) * 32;
+        ctx.fillStyle = b.c >= b.o ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)';
+        ctx.fillRect(xAt(i) - cw / 2, volTop + 32 - vh, cw, vh);
+      });
+    }
+
+    // level lines (target / entry / stop)
+    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    this.levels.forEach((l) => {
+      if (!Number.isFinite(l.price)) return;
+      const y = yAt(l.price);
+      ctx.save();
+      ctx.setLineDash(l.dash ? [6, 4] : []);
+      ctx.strokeStyle = l.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(w - padR, y);
+      ctx.stroke();
+      ctx.restore();
+      const text = `${l.label} ${fmtP(l.price)}`;
+      const tw = ctx.measureText(text).width + 8;
+      ctx.fillStyle = l.color;
+      ctx.fillRect(padL + 4, y - 14, tw, 13);
+      ctx.fillStyle = C.ink;
+      ctx.fillText(text, padL + 8, y - 4);
+    });
+
+    // markers (entry / exit)
+    const t0 = new Date(slice[0].t).getTime();
+    this.markers.forEach((m) => {
+      const tm = new Date(m.t).getTime();
+      if (!Number.isFinite(tm) || tm < t0 || !Number.isFinite(m.price)) return;
+      let idx = slice.length - 1;
+      for (let i = 0; i < slice.length; i++) {
+        if (new Date(slice[i].t).getTime() > tm) {
+          idx = Math.max(0, i - 1);
+          break;
+        }
+      }
+      const x = xAt(idx);
+      const y = yAt(m.price);
+      const dir = m.up ? -1 : 1;
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - 6, y - dir * 11);
+      ctx.lineTo(x + 6, y - dir * 11);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = '700 10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      const lw = ctx.measureText(m.label).width;
+      ctx.fillText(m.label, x + 8 + lw > w - padR ? x - 8 - lw : x + 8, y - dir * 8);
+    });
+
+    // live price line + axis label
+    const last = slice[slice.length - 1];
+    const lp = this.live != null ? this.live : last.c;
+    const py = yAt(lp);
+    if (this.live != null) {
+      ctx.save();
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = C.live;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL, py);
+      ctx.lineTo(w - padR, py);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = this.live != null ? C.live : lp >= last.o ? C.up : C.down;
+    const label = fmtP(lp);
+    ctx.font = '11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.fillRect(w - padR + 2, py - 9, ctx.measureText(label).width + 10, 18);
+    ctx.fillStyle = C.ink;
+    ctx.fillText(label, w - padR + 7, py + 4);
+
+    // legend
+    const legend = [];
+    if (ind.ema9) legend.push(['EMA 9', '#eab308']);
+    if (ind.ema21) legend.push(['EMA 21', '#3b82f6']);
+    if (ind.vwap) legend.push(['VWAP', '#a855f7']);
+    let lx = padL;
+    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    legend.forEach(([name, color]) => {
+      ctx.fillStyle = color;
+      ctx.fillRect(lx, h - 12, 8, 8);
+      ctx.fillStyle = C.text;
+      ctx.fillText(name, lx + 12, h - 4);
+      lx += ctx.measureText(name).width + 28;
+    });
+
+    // crosshair + OHLC tooltip
+    if (this.hover != null && slice[this.hover]) {
+      const b = slice[this.hover];
+      const x = xAt(this.hover);
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = '#6b7280';
+      ctx.beginPath();
+      ctx.moveTo(x, padT);
+      ctx.lineTo(x, padT + plotH);
+      ctx.moveTo(padL, yAt(b.c));
+      ctx.lineTo(w - padR, yAt(b.c));
+      ctx.stroke();
+      ctx.restore();
+      tooltipBox(ctx, w, x, yAt(b.c), [fmtT(b.t), `O ${fmtP(b.o)}  H ${fmtP(b.h)}`, `L ${fmtP(b.l)}  C ${fmtP(b.c)}`, `Vol ${Math.round(b.v || 0).toLocaleString()}`]);
+    }
+
+    const first = slice[0];
+    const hi = Math.max(...slice.map((b) => b.h));
+    const lo = Math.min(...slice.map((b) => b.l));
+    const e9 = ema(closes, 9);
+    const e21 = ema(closes, 21);
+    const n9 = e9[e9.length - 1];
+    const n21 = e21[e21.length - 1];
+    const move = (last.c - first.c) / (first.c || 1);
+    const trend = Math.abs(move) < 0.003 ? 'sideways' : move > 0 ? 'uptrend' : 'downtrend';
+    const emaNote = n9 != null && n21 != null ? `, EMA 9 ${n9 >= n21 ? 'above' : 'below'} EMA 21` : '';
+    const named = (label) => this.levels.find((l) => l.label === label);
+    const lvl = ['ENTRY', 'STOP', 'TARGET'].map((k) => (named(k) && Number.isFinite(named(k).price) ? `${k.toLowerCase()} ${fmtP(named(k).price)}` : null)).filter(Boolean);
+    this._summary(
+      `${this.title ? `${this.title} candlestick chart` : 'Candlestick chart'}. Last price ${fmtP(lp)}. Trend: ${trend}, ${pctStr(first.c, last.c)} over ${slice.length} bars${emaNote}.${lvl.length ? ` Levels: ${lvl.join(', ')}.` : ''} Range ${fmtP(lo)} to ${fmtP(hi)}, ${fmtT(first.t)} to ${fmtT(last.t)}. Use left and right arrow keys to inspect bars.`,
+    );
   }
 
-  // price label
-  const last = slice[slice.length - 1];
-  const py = yAt(last.c);
-  ctx.fillStyle = last.c >= last.o ? '#22c55e' : '#ef4444';
-  ctx.beginPath();
-  const label = last.c.toFixed(2);
-  ctx.font = '11px IBM Plex Sans, sans-serif';
-  const tw = ctx.measureText(label).width + 10;
-  ctx.roundRect?.(w - padR + 4, py - 9, tw, 18, 4);
-  if (ctx.roundRect) ctx.fill();
-  else ctx.fillRect(w - padR + 4, py - 9, tw, 18);
-  ctx.fillStyle = '#0b0c0e';
-  ctx.fillText(label, w - padR + 9, py + 4);
+  _summary(text) {
+    this.canvas.setAttribute('aria-label', text);
+    if (this.summaryEl) this.summaryEl.textContent = text;
+  }
+}
 
-  // legend
-  const legend = [];
-  if (indicators.ema9) legend.push(['EMA 9', '#eab308']);
-  if (indicators.ema21) legend.push(['EMA 21', '#3b82f6']);
-  if (indicators.vwap) legend.push(['VWAP', '#a855f7']);
-  let lx = padL;
-  const ly = h - 6;
-  ctx.font = '10px IBM Plex Sans, sans-serif';
-  legend.forEach(([name, color]) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(lx, ly - 8, 8, 8);
-    ctx.fillStyle = '#8b919c';
-    ctx.fillText(name, lx + 12, ly);
-    lx += ctx.measureText(name).width + 28;
-  });
+export class LineChart {
+  constructor(canvas, { summaryEl, tableEl, format = (v) => v.toFixed(2), color = '#22c55e', title = 'Line chart', yLabel = '', minRangePct = 0.5, tableRows = 60 } = {}) {
+    this.canvas = canvas;
+    this.summaryEl = summaryEl;
+    this.tableEl = tableEl;
+    this.yLabel = yLabel;
+    this.minRangePct = minRangePct;
+    this.tableRows = tableRows;
+    this.baseline = null;
+    this.format = format;
+    this.color = color;
+    this.title = title;
+    this.points = [];
+    this.hover = null;
+    canvas.setAttribute('role', 'img');
+    canvas.tabIndex = 0;
+    this.ro = new ResizeObserver(() => requestAnimationFrame(() => this.draw()));
+    this.ro.observe(canvas.parentElement || canvas);
+    canvas.addEventListener('mousemove', (e) => this._move(e.clientX));
+    canvas.addEventListener('mouseleave', () => {
+      this.hover = null;
+      this.draw();
+    });
+    canvas.addEventListener('touchmove', (e) => e.touches[0] && this._move(e.touches[0].clientX), { passive: true });
+    canvas.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const cur = this.hover ?? this.points.length - 1;
+      this.hover = Math.min(this.points.length - 1, Math.max(0, cur + (e.key === 'ArrowLeft' ? -1 : 1)));
+      this.draw();
+    });
+    canvas.addEventListener('blur', () => {
+      this.hover = null;
+      this.draw();
+    });
+  }
+  destroy() {
+    this.ro.disconnect();
+  }
+  /** points: [{t, v}]. opts.baseline: reference value (e.g. starting equity) that is always inside the y-range and drawn as a dashed line. */
+  set(points, opts = {}) {
+    this.points = points || [];
+    this.baseline = Number.isFinite(opts.baseline) ? opts.baseline : null;
+    if (this.tableEl) {
+      const rows = this.points.slice(-this.tableRows);
+      setTable(this.tableEl, rows.length ? tableHtml(`${this.title} — last ${rows.length} of ${this.points.length} points`, ['Time', 'Value'], rows.map((p) => [p.t ? fmtT(p.t) : '', this.format(p.v)])) : '');
+    }
+    this.draw();
+  }
+  _move(cx) {
+    if (this.points.length < 2) return;
+    const r = this.canvas.getBoundingClientRect();
+    const i = Math.round(((cx - r.left - 8) / (r.width - 8 - 62)) * (this.points.length - 1));
+    const c = Math.min(this.points.length - 1, Math.max(0, i));
+    if (c !== this.hover) {
+      this.hover = c;
+      this.draw();
+    }
+  }
+  draw() {
+    if (!this.canvas.isConnected) return;
+    const { ctx, w, h } = fit(this.canvas);
+    ctx.clearRect(0, 0, w, h);
+    const pts = this.points;
+    if (pts.length < 2) {
+      ctx.fillStyle = C.text;
+      ctx.font = '12px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillText('Not enough data yet', 8, 22);
+      this._summary(`${this.title}: not enough data yet.`);
+      return;
+    }
+    const padL = 8;
+    const padR = 62;
+    const padT = 18;
+    const padB = 22;
+    const vals = pts.map((p) => p.v);
+    let min = Math.min(...vals);
+    let max = Math.max(...vals);
+    if (this.baseline != null) {
+      min = Math.min(min, this.baseline);
+      max = Math.max(max, this.baseline);
+    }
+    // never zoom into noise: keep at least +/- minRangePct of the reference level visible
+    const ref = this.baseline ?? (vals[0] || 1);
+    const half = Math.abs(ref) * (this.minRangePct / 100);
+    const mid = (min + max) / 2;
+    if (max - min < half * 2) {
+      min = mid - half;
+      max = mid + half;
+    }
+    const pd = (max - min) * 0.08;
+    min -= pd;
+    max += pd;
+    const x = (i) => padL + (i / (pts.length - 1)) * (w - padL - padR);
+    const y = (v) => padT + ((max - v) / (max - min)) * (h - padT - padB);
+    ctx.strokeStyle = C.grid;
+    ctx.fillStyle = C.text;
+    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const gy = padT + ((h - padT - padB) / ticks) * i;
+      ctx.beginPath();
+      ctx.moveTo(padL, gy);
+      ctx.lineTo(w - padR, gy);
+      ctx.stroke();
+      ctx.fillText(this.format(max - ((max - min) / ticks) * i), w - padR + 4, gy + 3);
+    }
+    if (this.yLabel) ctx.fillText(this.yLabel, padL, 11);
+    // x-axis ticks: first / middle / last timestamp
+    const tickIdx = [0, Math.floor((pts.length - 1) / 2), pts.length - 1];
+    tickIdx.forEach((ti, k) => {
+      const p = pts[ti];
+      if (!p?.t) return;
+      const d = new Date(p.t);
+      const txt = Number.isNaN(d.getTime()) ? String(p.t) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const tw = ctx.measureText(txt).width;
+      const tx = k === 0 ? padL : k === 2 ? w - padR - tw : x(ti) - tw / 2;
+      ctx.fillText(txt, tx, h - 6);
+    });
+    if (this.baseline != null) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL, y(this.baseline));
+      ctx.lineTo(w - padR, y(this.baseline));
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#facc15';
+      ctx.fillText('start', padL + 2, y(this.baseline) - 4);
+      ctx.fillStyle = C.text;
+    }
+    const g = ctx.createLinearGradient(0, padT, 0, h - padB);
+    g.addColorStop(0, `${this.color}55`);
+    g.addColorStop(1, `${this.color}00`);
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.v)) : ctx.moveTo(x(i), y(p.v))));
+    ctx.lineTo(x(pts.length - 1), h - padB);
+    ctx.lineTo(x(0), h - padB);
+    ctx.closePath();
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.v)) : ctx.moveTo(x(i), y(p.v))));
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (this.hover != null && pts[this.hover]) {
+      const p = pts[this.hover];
+      ctx.beginPath();
+      ctx.arc(x(this.hover), y(p.v), 4, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.fill();
+      tooltipBox(ctx, w, x(this.hover), y(p.v), [p.t ? fmtT(p.t) : `#${this.hover + 1}`, this.format(p.v)]);
+    }
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    this._summary(`${this.title}${this.yLabel ? ` (${this.yLabel})` : ''}: ${pts.length} points, from ${this.format(first.v)} to ${this.format(last.v)} (${pctStr(first.v, last.v)}), low ${this.format(Math.min(...vals))}, high ${this.format(Math.max(...vals))}${this.baseline != null ? `, starting level ${this.format(this.baseline)}` : ''}.`);
+  }
+  _summary(text) {
+    this.canvas.setAttribute('aria-label', text);
+    if (this.summaryEl) this.summaryEl.textContent = text;
+  }
 }

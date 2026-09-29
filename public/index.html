@@ -3,50 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>tradingbot</title>
+  <meta name="color-scheme" content="dark" />
+  <title>Dashboard · tradingbot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <!-- Web font loads non-blocking (media=print swap); the CSS falls back to a system font stack until it arrives, or forever if it never does. -->
+  <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" /></noscript>
   <link rel="stylesheet" href="/css/dashboard.css" />
-  <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#view-root">Skip to content</a>
   <div id="app">
     <header class="topnav">
       <div class="topnav-left">
-        <a class="brand" href="#dashboard" data-nav="dashboard">tradingbot</a>
-        <nav class="nav-links" id="main-nav">
-          <a href="#dashboard" data-nav="dashboard" class="active">DASHBOARD</a>
+        <a class="brand" href="#dashboard">tradingbot</a>
+        <nav class="nav-links" id="main-nav" aria-label="Main">
+          <a href="#dashboard" data-nav="dashboard" class="active" aria-current="page">DASHBOARD</a>
+          <a href="#performance" data-nav="performance">PERFORMANCE</a>
           <a href="#market" data-nav="market">MARKET</a>
-          <a href="#ai-desk" data-nav="ai-desk">AI DESK</a>
-          <a href="#strategies" data-nav="strategies">STRATEGIES</a>
-          <a href="#activity" data-nav="activity">ACTIVITY</a>
-          <a href="#chat" data-nav="chat">CHAT</a>
-          <a href="#decisions" data-nav="decisions">DECISIONS</a>
           <a href="#logs" data-nav="logs">LOGS</a>
           <a href="#settings" data-nav="settings">SETTINGS</a>
         </nav>
       </div>
       <div class="topnav-right">
-        <span class="badge badge-paper" id="mode-badge">PREDICT</span>
-        <span class="worker-status" id="worker-status">
-          <span class="dot" id="worker-dot"></span>
-          worker
+        <span class="badge badge-paper" id="mode-badge" title="Simulated positions only — no orders are ever sent">PAPER · PREDICT</span>
+        <span class="worker-status" id="worker-status" role="status">
+          <span class="dot" id="worker-dot" aria-hidden="true"></span>
+          <span id="worker-label">worker</span>
         </span>
         <button class="btn btn-stop" id="btn-stop" type="button">STOP</button>
         <button class="btn btn-kill" id="btn-kill" type="button">KILL</button>
-        <div class="avatar-row">
-          <button class="icon-btn" title="Theme" type="button" aria-label="Theme">◐</button>
-          <button class="icon-btn accent" title="Status" type="button" aria-label="Status">●</button>
-          <button class="icon-btn" title="Account" type="button" aria-label="Account">◎</button>
-        </div>
-        <button class="signout" type="button">Sign out</button>
+        <span class="acct-email" id="acct-email" hidden></span>
+        <button class="signout" id="btn-signout" type="button" hidden>Sign out</button>
+        <button class="signout" id="btn-auth" type="button" hidden>Sign in</button>
       </div>
     </header>
 
-    <main id="view-root"></main>
+    <main id="view-root" tabindex="-1"></main>
   </div>
 
+  <noscript><p style="padding:16px">This dashboard needs JavaScript.</p></noscript>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

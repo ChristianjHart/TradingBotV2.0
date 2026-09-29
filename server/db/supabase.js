@@ -8,6 +8,7 @@ const KEY = envAny('SUPABASE_SERVICE_ROLE_KEY');
 export const supabaseEnabled = Boolean(URL_ && KEY);
 
 const MAX_QUEUE = 5000;
+export const MAX_FAILS = 3; // a batch group that fails this many consecutive times is dropped (poisoned)
 let queue = [];
 let flushing = false;
 
@@ -16,7 +17,7 @@ function headers(extra = {}) {
 }
 
 // PostgREST bulk inserts require every object to have the same keys.
-function normalize(rows) {
+export function normalize(rows) {
   const keys = new Set(rows.flatMap((r) => Object.keys(r)));
   return rows.map((r) => Object.fromEntries([...keys].map((k) => [k, r[k] === undefined ? null : r[k]])));
 }
@@ -55,28 +56,47 @@ export function upsert(table, row) {
   queue.push({ table, row, upsert: true });
 }
 
+/** Awaited upsert (throws on failure) for rows that must not be silently lost, e.g. accounts. No-op when disabled. */
+export async function upsertNow(table, row) {
+  if (!supabaseEnabled) return false;
+  await post(table, [row], true);
+  return true;
+}
+
 export async function flush() {
   if (!supabaseEnabled || flushing || !queue.length) return;
   flushing = true;
-  const batch = queue;
-  queue = [];
-  const groups = new Map();
-  for (const item of batch) {
-    const k = `${item.table}|${item.upsert}`;
-    if (!groups.has(k)) groups.set(k, { table: item.table, upsert: item.upsert, rows: [] });
-    groups.get(k).rows.push(item.row);
-  }
-  for (const g of groups.values()) {
-    try {
-      await post(g.table, g.rows, g.upsert);
-    } catch (err) {
-      warnOnce(g.table, err.message);
-      // keep rows for one retry cycle unless the queue is already big
-      if (queue.length < MAX_QUEUE / 2) queue.push(...g.rows.map((row) => ({ table: g.table, row, upsert: g.upsert })));
+  try {
+    const batch = queue;
+    queue = [];
+    const groups = new Map();
+    for (const item of batch) {
+      const k = `${item.table}|${item.upsert}|${item.fails || 0}`; // retried rows batch apart from fresh ones
+      if (!groups.has(k)) groups.set(k, { table: item.table, upsert: item.upsert, items: [] });
+      groups.get(k).items.push(item);
     }
+    for (const g of groups.values()) {
+      try {
+        await post(g.table, g.items.map((i) => i.row), g.upsert);
+      } catch (err) {
+        warnOnce(g.table, err.message);
+        const fails = Math.max(...g.items.map((i) => i.fails || 0)) + 1;
+        if (fails >= MAX_FAILS) {
+          // Poisoned batch (e.g. schema mismatch / bad row): retrying forever would block the queue. Drop it.
+          console.warn(`[supabase] dropping ${g.items.length} ${g.table} row(s) after ${fails} consecutive failures: ${err.message}`);
+          continue;
+        }
+        // keep rows for another retry cycle unless the queue is already big
+        if (queue.length < MAX_QUEUE / 2) queue.push(...g.items.map((i) => ({ ...i, fails })));
+      }
+    }
+  } finally {
+    flushing = false;
   }
-  flushing = false;
 }
+
+/** Test hook. */
+export const _queueLength = () => queue.length;
 
 export async function select(table, query = '') {
   if (!supabaseEnabled) return [];
@@ -90,5 +110,4 @@ export async function select(table, query = '') {
 
 if (supabaseEnabled) {
   setInterval(() => flush(), 2000).unref();
-  process.on('SIGTERM', () => flush().finally(() => process.exit(0)));
 }

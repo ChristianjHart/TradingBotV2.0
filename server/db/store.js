@@ -16,36 +16,32 @@ function readJson(file, fallback) {
   }
 }
 
+/** Atomic write: temp file + rename so a crash never leaves half a JSON file. */
 function writeJson(file, data) {
   ensureDir(path.dirname(file));
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
 }
 
 const defaults = {
-  watchlist: { date: null, symbols: [], updatedAt: null },
-  predictions: [],
-  model: {
-    version: 1,
-    weights: {
-      momentum: 1,
-      rsi: 1,
-      macd: 1,
-      volume: 1,
-      volatility: 1,
-      trend: 1,
-    },
-    bias: 0,
-    trainedOn: 0,
-    lastTrainedAt: null,
-  },
   logs: [],
   settings: {
     mode: 'predict', // predict only — never trade
     paper: true,
     tradingEnabled: false,
-    autoScan: true,
+    autoScan: true, // keep monitoring positions on a schedule
+    autoRun: false, // scheduled AI runs (costs OpenRouter credits) — opt in
     watchlistSize: config.watchlistSize,
     horizonHours: config.predictionHorizonHours,
+    slippageBps: config.trading.slippageBps,
+    feeBps: config.trading.feeBps,
+    breakEven: true,
+    trailR: 0, // >0 trails the stop this many R behind the best price
+    maxGrossPct: config.trading.maxGrossPct,
+    maxClassPct: config.trading.maxClassPct,
+    maxPerGroup: config.trading.maxPerGroup,
+    dailyLossHaltPct: config.trading.dailyLossHaltPct,
   },
   worker: {
     status: 'online',
@@ -58,94 +54,165 @@ const defaults = {
 ensureDir(config.dataDir);
 
 const files = {
-  watchlist: path.join(config.dataDir, 'watchlist.json'),
-  predictions: path.join(config.dataDir, 'predictions.json'),
-  model: path.join(config.dataDir, 'model.json'),
   logs: path.join(config.dataDir, 'logs.json'),
   settings: path.join(config.dataDir, 'settings.json'),
   worker: path.join(config.dataDir, 'worker.json'),
   aiPicks: path.join(config.dataDir, 'ai-picks.json'),
   positions: path.join(config.dataDir, 'positions.json'),
   runSummary: path.join(config.dataDir, 'run-summary.json'),
+  runs: path.join(config.dataDir, 'runs.json'),
+  equity: path.join(config.dataDir, 'equity.json'),
+  pickScores: path.join(config.dataDir, 'pick-scores.json'),
+  positionsArchive: path.join(config.dataDir, 'positions-archive.json'),
+  dayStart: path.join(config.dataDir, 'day-start.json'),
 };
 
+export const MAX_POSITIONS = 1000;
+
+// Write-through cache: each file is parsed once, then served from memory. Getters hand out clones
+// so callers may mutate freely; only set*() (which also writes the file) changes the cache.
+const cache = new Map();
+function cached(key, file, fallback) {
+  if (!cache.has(key)) cache.set(key, readJson(file, fallback));
+  return structuredClone(cache.get(key));
+}
+function put(key, file, data) {
+  writeJson(file, data);
+  cache.set(key, structuredClone(data));
+}
+
+// Logs are hot: keep them in memory and write to disk at most every LOG_FLUSH_MS.
+const LOG_FLUSH_MS = 1000;
+let logCache = null;
+let logTimer = null;
+
+function flushLogs() {
+  clearTimeout(logTimer);
+  logTimer = null;
+  if (logCache) writeJson(files.logs, logCache);
+}
+process.on('exit', () => {
+  try {
+    if (logTimer) flushLogs();
+  } catch {
+    /* best effort */
+  }
+});
+
 export const store = {
-  getWatchlist() {
-    return readJson(files.watchlist, defaults.watchlist);
-  },
-  setWatchlist(data) {
-    writeJson(files.watchlist, data);
-  },
-
-  getPredictions() {
-    return readJson(files.predictions, defaults.predictions);
-  },
-  setPredictions(data) {
-    writeJson(files.predictions, data);
-  },
-  upsertPrediction(pred) {
-    const all = this.getPredictions();
-    const idx = all.findIndex((p) => p.id === pred.id);
-    if (idx >= 0) all[idx] = pred;
-    else all.unshift(pred);
-    this.setPredictions(all.slice(0, 2000));
-    return pred;
-  },
-
-  getModel() {
-    return readJson(files.model, defaults.model);
-  },
-  setModel(data) {
-    writeJson(files.model, data);
-  },
-
   getLogs() {
-    return readJson(files.logs, defaults.logs);
+    logCache ||= readJson(files.logs, defaults.logs);
+    return logCache;
   },
   addLog(entry) {
     const logs = this.getLogs();
-    logs.unshift({
+    const row = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       ts: new Date().toISOString(),
       level: entry.level || 'info',
       message: entry.message,
-    });
-    writeJson(files.logs, logs.slice(0, 500));
-    insert('app_logs', { ts: logs[0].ts, level: logs[0].level, message: logs[0].message });
+    };
+    logs.unshift(row);
+    logs.length = Math.min(logs.length, 500);
+    logTimer ||= setTimeout(flushLogs, LOG_FLUSH_MS);
+    logTimer.unref?.();
+    insert('app_logs', { ts: row.ts, level: row.level, message: row.message });
+  },
+  flush() {
+    if (logTimer) flushLogs();
   },
 
   getSettings() {
-    return { ...defaults.settings, ...readJson(files.settings, defaults.settings) };
+    return { ...defaults.settings, ...cached('settings', files.settings, defaults.settings) };
   },
   setSettings(data) {
-    writeJson(files.settings, data);
+    put('settings', files.settings, data);
   },
 
   getAiPicks() {
-    return readJson(files.aiPicks, { picks: [], updatedAt: null });
+    return cached('aiPicks', files.aiPicks, { picks: [], updatedAt: null });
   },
   setAiPicks(data) {
-    writeJson(files.aiPicks, data);
+    put('aiPicks', files.aiPicks, data);
   },
 
   getRunSummary() {
-    return readJson(files.runSummary, null);
+    return cached('runSummary', files.runSummary, null);
   },
   setRunSummary(data) {
-    writeJson(files.runSummary, data);
+    put('runSummary', files.runSummary, data);
   },
 
-  getPositions() {
-    return readJson(files.positions, []);
+  /** Run history, newest first (successful and failed runs). */
+  getRuns() {
+    return cached('runs', files.runs, []);
   },
+  setRuns(data) {
+    put('runs', files.runs, data.slice(0, 200));
+  },
+  addRun(run) {
+    this.setRuns([run, ...this.getRuns()]);
+  },
+
+  /** Equity snapshots [{t, equity}] ascending. */
+  getEquity() {
+    return cached('equity', files.equity, []);
+  },
+  setEquity(data) {
+    put('equity', files.equity, data.slice(-3000));
+  },
+
+  /** Scanner picks with their horizon outcome (see services/picks.js). */
+  getPickScores() {
+    return cached('pickScores', files.pickScores, []);
+  },
+  setPickScores(data) {
+    put('pickScores', files.pickScores, data.slice(0, 5000));
+  },
+
+  /** Positions, newest first. */
+  getPositions() {
+    return cached('positions', files.positions, []);
+  },
+  /**
+   * Keeps every open position plus the newest closed ones up to MAX_POSITIONS; older closed
+   * positions are appended to positions-archive.json instead of being dropped.
+   */
   setPositions(data) {
-    writeJson(files.positions, data);
+    let keep = data;
+    if (data.length > MAX_POSITIONS) {
+      const room = Math.max(0, MAX_POSITIONS - data.filter((p) => p.status === 'open').length);
+      let closedSeen = 0;
+      keep = [];
+      const overflow = [];
+      for (const p of data) {
+        if (p.status === 'open' || closedSeen++ < room) keep.push(p);
+        else overflow.push(p);
+      }
+      if (overflow.length) {
+        const archive = readJson(files.positionsArchive, []);
+        const seen = new Set(archive.map((p) => p.id));
+        writeJson(files.positionsArchive, [...archive, ...overflow.filter((p) => !seen.has(p.id))]);
+      }
+    }
+    put('positions', files.positions, keep);
+  },
+  getPositionsArchive() {
+    return readJson(files.positionsArchive, []);
+  },
+
+  /** Start-of-ET-day equity snapshot { day:'YYYY-MM-DD', equity } used for the daily loss halt. */
+  getDayStart() {
+    return cached('dayStart', files.dayStart, null);
+  },
+  setDayStart(data) {
+    put('dayStart', files.dayStart, data);
   },
 
   getWorker() {
-    return { ...defaults.worker, ...readJson(files.worker, defaults.worker) };
+    return { ...defaults.worker, ...cached('worker', files.worker, defaults.worker) };
   },
   setWorker(data) {
-    writeJson(files.worker, data);
+    put('worker', files.worker, data);
   },
 };

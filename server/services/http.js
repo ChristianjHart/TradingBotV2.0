@@ -1,6 +1,9 @@
 import { insert } from '../db/supabase.js';
+import { scrubSecrets } from '../config.js';
 
-const SECRET = /key|secret|token|authorization|password/i;
+const SECRET = /key|secret|token|authorization|password|cookie|passwd|code|current|next/i;
+// Credential-bearing routes: their bodies are never logged at all.
+const SENSITIVE_PATH = /^\/api\/(auth|account)(\/|$)/;
 
 export function redact(value, depth = 0) {
   if (value == null || depth > 4) return value;
@@ -28,7 +31,7 @@ export async function loggedFetch(service, url, options = {}) {
     insert('api_logs', { ...row, status: res.status, duration_ms: Date.now() - started });
     return res;
   } catch (err) {
-    insert('api_logs', { ...row, duration_ms: Date.now() - started, error: err.message });
+    insert('api_logs', { ...row, duration_ms: Date.now() - started, error: scrubSecrets(err.message) });
     throw err;
   }
 }
@@ -45,7 +48,7 @@ export function requestLogger(req, res, next) {
       url: req.originalUrl.split('?')[0],
       status: res.statusCode,
       duration_ms: Date.now() - started,
-      request: redact({ query: req.query, body: req.body }),
+      request: SENSITIVE_PATH.test(req.originalUrl) ? { redacted: true } : redact({ query: req.query, body: req.body }),
     });
   });
   next();

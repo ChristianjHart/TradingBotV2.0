@@ -1,16 +1,46 @@
 import { Router } from 'express';
 import { store } from '../db/store.js';
 import { alpaca } from '../services/alpaca.js';
-import { runMarketScan, ensureTodayWatchlist } from '../services/scanner.js';
-import { evaluateOpenPredictions, getAccuracyStats } from '../services/evaluator.js';
 import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
-import { trainFromOutcomes } from '../services/trainer.js';
 import { supabaseEnabled } from '../db/supabase.js';
 import { startAiRun, runState } from '../services/aiRun.js';
-import { listPositions, closeManually } from '../services/positions.js';
+import { listPositions, closeManually, closeAll } from '../services/positions.js';
+import { computePerformance } from '../services/performance.js';
+import { pickStats } from '../services/picks.js';
+import { usMarketOpen } from '../services/market.js';
+import { rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
+import { UNIVERSE } from '../services/universe.js';
+import { resolveAuth, authGate, csrfGuard, setupGuard } from '../auth/index.js';
+import { authRouter, accountRouter } from './auth.js';
 
 const router = Router();
 
+// Dashboard polling (GET, not market data) has its own generous bucket; everything else shares a tighter one.
+// The credit-spending run trigger is tighter still and is not charged for 200 "already running" replies.
+const pollLimit = rateLimit({ windowMs: 60_000, max: 1200, name: 'poll' });
+const apiLimit = rateLimit({ windowMs: 60_000, max: 300, name: 'api' });
+router.use((req, res, next) => (req.method === 'GET' && !req.path.startsWith('/market') ? pollLimit : apiLimit)(req, res, next));
+const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run', refundWhen: (res) => res.statusCode === 200 });
+
+/** JSON error with the error's own HTTP status when it has one, else `fallback`. */
+function sendError(res, err, fallback = 500) {
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : fallback;
+  res.status(status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+}
+/** Market endpoints only serve the scanner universe plus open-position symbols (bounded caches, no arbitrary upstream calls). */
+function marketSymbolError(symbol) {
+  if (typeof symbol !== 'string' || !validSymbol(symbol)) return 'invalid symbol';
+  if (UNIVERSE.includes(symbol)) return null;
+  if (store.getPositions().some((p) => p.status === 'open' && p.symbol === symbol)) return null;
+  return 'symbol not in the scanner universe or open positions';
+}
+const wantsForce = (req) => /^(1|true)$/i.test(String(req.query.force ?? req.body?.force ?? ''));
+
+const accuracy = () => pickStats(store.getPickScores(), openPickCount());
+const openPickCount = () => store.getPickScores().filter((r) => !r.scored).length;
+
+// Order matters: CSRF -> who is calling -> public routes (health, /auth/*) -> gate -> everything else.
+router.use(csrfGuard, resolveAuth);
 router.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -24,42 +54,80 @@ router.get('/health', (_req, res) => {
   });
 });
 
-router.post('/run', (_req, res) => {
+
+router.use('/auth', authRouter);
+router.use(setupGuard); // production with no account and no ADMIN_TOKEN: 503 setup_required (fail closed)
+router.use(authGate); // from here on a valid session cookie or Bearer ADMIN_TOKEN is required (once an account or ADMIN_TOKEN exists)
+router.use('/account', accountRouter);
+
+// A stopped/killed worker must not spend credits or open positions: 409 (exits stay managed by the monitor).
+router.post('/run', runLimit, (_req, res) => {
+  const ws = store.getWorker().status;
+  if (ws === 'stopped' || ws === 'killed') {
+    return res.status(409).json({ error: `worker is ${ws}: start the worker before running the AI desk`, code: 'worker_not_running', workerStatus: ws });
+  }
   const started = startAiRun();
   res.status(started ? 202 : 200).json({ started, ...runState });
 });
 
 router.get('/run/status', (_req, res) => res.json(runState));
 
+router.get('/runs', (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
+  res.json({ runs: store.getRuns().slice(0, limit) });
+});
+
 router.get('/ai/summary', (_req, res) => res.json(store.getRunSummary() || {}));
 
 router.get('/ai/picks', (_req, res) => res.json(store.getAiPicks()));
 
-router.get('/positions', async (_req, res) => {
-  try {
-    res.json(await listPositions());
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+router.get('/performance', (_req, res) => {
+  res.json(
+    computePerformance({
+      positions: store.getPositions(),
+      snapshots: store.getEquity(),
+      pickRecords: store.getPickScores(),
+      startingEquity: config.paperEquity,
+    }),
+  );
 });
 
-router.post('/positions/:id/close', async (req, res) => {
-  const p = await closeManually(req.params.id).catch(() => null);
-  if (!p) return res.status(404).json({ error: 'open position not found' });
-  res.json(p);
-});
+router.get('/positions', asyncHandler(async (_req, res) => {
+  res.json(await listPositions());
+}));
+
+// Body/query `force` closes at the last (stale) price. Errors: 409 stale quote, 502 no quote (nothing closed).
+router.post('/positions/close-all', asyncHandler(async (req, res) => {
+  try {
+    const r = await closeAll({ force: wantsForce(req) });
+    if (r.failed.length && !r.closed) {
+      const first = r.failed[0];
+      return res.status(r.failed.some((f) => f.status === 409) ? 409 : first.status).json({ error: first.error, code: first.code, closed: 0, failed: r.failed });
+    }
+    res.json(r);
+  } catch (err) {
+    sendError(res, err);
+  }
+}));
+
+router.post('/positions/:id/close', asyncHandler(async (req, res) => {
+  try {
+    res.json(await closeManually(req.params.id, { force: wantsForce(req) }));
+  } catch (err) {
+    sendError(res, err);
+  }
+}));
 
 router.get('/status', (_req, res) => {
   const worker = store.getWorker();
   const settings = store.getSettings();
-  const stats = getAccuracyStats();
   res.json({
     worker,
     settings: {
       ...settings,
       tradingEnabled: false, // hard lock — predictions only
     },
-    accuracy: stats,
+    accuracy: accuracy(),
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
     supabaseConfigured: supabaseEnabled,
@@ -67,111 +135,63 @@ router.get('/status', (_req, res) => {
     mockData: alpaca.usingMock(),
     dataMode: alpaca.usingMock() ? 'mock' : 'alpaca',
     fallbacks: alpaca.getFallbacks(),
+    marketOpen: usMarketOpen(),
+    staleSymbols: alpaca.getStale(),
   });
-});
-
-router.get('/watchlist', async (_req, res) => {
-  try {
-    const wl = await ensureTodayWatchlist();
-    res.json(wl);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/scan', async (_req, res) => {
-  try {
-    const result = await runMarketScan({ force: true });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/predictions', (req, res) => {
-  const status = req.query.status;
-  let list = store.getPredictions();
-  if (status) list = list.filter((p) => p.status === status);
-  res.json({ predictions: list.slice(0, 200) });
-});
-
-router.get('/predictions/open', (_req, res) => {
-  res.json({
-    predictions: store.getPredictions().filter((p) => p.status === 'open'),
-  });
-});
-
-router.get('/accuracy', (_req, res) => {
-  res.json(getAccuracyStats());
-});
-
-router.post('/evaluate', async (_req, res) => {
-  try {
-    const result = await evaluateOpenPredictions();
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/train', (_req, res) => {
-  const model = trainFromOutcomes();
-  store.addLog({ level: 'info', message: `manual train → model v${model.version}` });
-  res.json(model);
-});
-
-router.get('/model', (_req, res) => {
-  res.json(store.getModel());
 });
 
 router.get('/logs', (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
   res.json({ logs: store.getLogs().slice(0, limit) });
 });
 
-router.get('/market/quote/:symbol', async (req, res) => {
+router.get('/market/quote/:symbol', asyncHandler(async (req, res) => {
+  const symbol = req.params.symbol; // Express already decodes params once (a malformed escape is a 400 from the router)
+  const bad = marketSymbolError(symbol);
+  if (bad) return res.status(400).json({ error: bad });
   try {
-    const symbol = decodeURIComponent(req.params.symbol);
-    const quote = await alpaca.getQuote(symbol);
-    res.json(quote);
+    res.json(await alpaca.getQuote(symbol));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
-});
+}));
 
-router.get('/market/bars/:symbol', async (req, res) => {
+router.get('/market/bars/:symbol', asyncHandler(async (req, res) => {
+  const symbol = req.params.symbol;
+  const bad = marketSymbolError(symbol);
+  if (bad) return res.status(400).json({ error: bad });
   try {
-    const symbol = decodeURIComponent(req.params.symbol);
-    const limit = Number(req.query.limit) || 100;
-    const bars = await alpaca.getBars(symbol, { limit });
-    res.json({ symbol, bars });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    res.json({ symbol, bars: await alpaca.getBars(symbol, { limit }) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
-});
+}));
 
-router.get('/market/quotes', async (req, res) => {
+router.get('/market/quotes', asyncHandler(async (req, res) => {
+  const symbols = String(req.query.symbols || 'SPY,QQQ,IWM')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const bad = symbols.map(marketSymbolError).find(Boolean);
+  if (symbols.length > 30 || bad) return res.status(400).json({ error: bad || 'too many symbols' });
   try {
-    const symbols = (req.query.symbols || 'SPY,QQQ,IWM')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const quotes = await alpaca.getQuotes(symbols);
-    res.json({ quotes });
+    res.json({ quotes: await alpaca.getQuotes(symbols) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 502);
   }
-});
+}));
 
 router.get('/settings', (_req, res) => {
   res.json({ ...store.getSettings(), tradingEnabled: false });
 });
 
 router.patch('/settings', (req, res) => {
-  const current = store.getSettings();
+  const { value, error } = validateSettings(req.body);
+  if (error) return res.status(400).json({ error });
   const next = {
-    ...current,
-    ...req.body,
+    ...store.getSettings(),
+    ...value,
     tradingEnabled: false, // never allow enabling trades from API
     mode: 'predict',
   };
@@ -182,58 +202,36 @@ router.patch('/settings', (req, res) => {
 
 router.post('/worker/stop', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'stopped', scanning: false });
-  store.addLog({ level: 'info', message: 'worker stopped (predictions paused)' });
+  store.addLog({ level: 'info', message: 'worker stopped (scheduled runs paused)' });
   res.json(store.getWorker());
 });
 
 router.post('/worker/start', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'online' });
-  store.addLog({ level: 'info', message: 'worker online (predict mode)' });
+  store.addLog({ level: 'info', message: 'worker online' });
   res.json(store.getWorker());
 });
 
 router.post('/worker/kill', (_req, res) => {
   store.setWorker({ ...store.getWorker(), status: 'killed', scanning: false });
-  store.addLog({ level: 'warn', message: 'worker KILL — all cycles halted' });
+  store.addLog({ level: 'warn', message: 'worker KILL — scheduled runs halted' });
   res.json(store.getWorker());
 });
 
-router.get('/dashboard', async (_req, res) => {
-  try {
-    const wl = store.getWatchlist();
-    const open = store.getPredictions().filter((p) => p.status === 'open');
-    const recent = store.getPredictions().filter((p) => p.status === 'resolved').slice(0, 20);
-    const stats = getAccuracyStats();
-    const worker = store.getWorker();
-    const model = store.getModel();
-    const logs = store.getLogs().slice(0, 40);
-
-    // Allocation by direction on open predictions
-    const longs = open.filter((p) => p.direction === 'long');
-    const shorts = open.filter((p) => p.direction === 'short');
-    const allocation = [
-      { label: 'LONG', value: longs.length, color: '#22c55e' },
-      { label: 'SHORT', value: shorts.length, color: '#ef4444' },
-      { label: 'WATCH', value: Math.max(0, (wl.symbols?.length || 0) - open.length), color: '#8b5cf6' },
-    ];
-
-    res.json({
-      watchlist: wl,
-      openPredictions: open,
-      recentResolved: recent,
-      accuracy: stats,
-      worker,
-      model,
-      logs,
-      allocation,
-      tradingEnabled: false,
-      mockData: alpaca.usingMock(),
-      fallbacks: alpaca.getFallbacks(),
-      horizonHours: config.predictionHorizonHours,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Slim summary kept for the frontend's log fallback; the old prediction/watchlist/model fields are gone.
+router.get('/dashboard', (_req, res) => {
+  res.json({
+    accuracy: accuracy(),
+    worker: store.getWorker(),
+    logs: store.getLogs().slice(0, 40),
+    tradingEnabled: false,
+    mockData: alpaca.usingMock(),
+    fallbacks: alpaca.getFallbacks(),
+    horizonHours: store.getSettings().horizonHours,
+  });
 });
+
+// Unknown /api paths are a JSON 404 (never the SPA's index.html).
+router.use((_req, res) => res.status(404).json({ error: 'not found' }));
 
 export default router;
