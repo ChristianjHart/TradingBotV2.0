@@ -81,6 +81,14 @@ export const config = {
   get signupCode() {
     return process.env.SIGNUP_CODE || '';
   },
+  /** Deployed (NODE_ENV=production or Render): cookies are always Secure, HSTS is sent, setup fails closed. Read at call time. */
+  get isProduction() {
+    return process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER);
+  },
+  /** Fail closed while no account exists: production, Render, or REQUIRE_SETUP=true. */
+  get requireSetup() {
+    return this.isProduction || process.env.REQUIRE_SETUP === 'true';
+  },
   get allowSignup() {
     return process.env.ALLOW_SIGNUP === 'true';
   },
