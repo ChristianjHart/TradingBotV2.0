@@ -11,8 +11,9 @@ Decide which candidates are actually worth trading and choose AT MOST the given 
 Rules: stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
 Reply with ONLY JSON: {"trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
 
-function rulesTrades(cands, slots) {
-  return cands.slice(0, slots).map((c) => {
+function rulesTrades(cands, slots, cash) {
+  const picks = cands.slice(0, slots);
+  return picks.map((c) => {
     const atrAbs = c.price * ((c.atrPct || 1.5) / 100);
     const dir = c.direction === 'long' ? 1 : -1;
     return {
@@ -20,7 +21,7 @@ function rulesTrades(cands, slots) {
       side: c.direction,
       stopLoss: c.price - dir * atrAbs * 2,
       takeProfit: c.price + dir * atrAbs * 3.5,
-      allocationUsd: Infinity, // sized below
+      allocationUsd: (cash * 0.95) / picks.length, // equal split; risk-capped below
       reason: `rule-based: ${c.reason}`,
     };
   });
@@ -70,7 +71,7 @@ export async function runTraderBot(picks) {
     }
   }
   if (!proposed) {
-    proposed = rulesTrades(cands, slots);
+    proposed = rulesTrades(cands, slots, account.cash);
     source = 'rules';
     model = null;
   }
