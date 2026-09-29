@@ -1,0 +1,22 @@
+{
+  "name": "tradingbot-v2",
+  "version": "2.0.0",
+  "description": "AI market scanner & prediction dashboard — watch, predict, learn. No live trading.",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "scan": "node server/cli/scan.js",
+    "evaluate": "node server/cli/evaluate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3"
+  }
+}
