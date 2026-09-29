@@ -780,6 +780,11 @@ function bindChrome() {
 
 async function boot() {
   bindChrome();
+  window.addEventListener('hashchange', () => {
+    const page = (window.location.hash || '#dashboard').replace('#', '') || 'dashboard';
+    state.page = page;
+    render();
+  });
   const hash = (window.location.hash || '#dashboard').replace('#', '');
   state.page = hash || 'dashboard';
   try {
