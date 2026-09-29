@@ -121,6 +121,17 @@ export async function signOut(btn) {
   lock('You have been signed out.');
 }
 
+/** Open the create-owner-account screen from the open (no account yet) dashboard. */
+export function openSignup() {
+  view = 'signup';
+  lock('');
+}
+
+/** Leave the auth screen and keep using the open dashboard (only offered while no login is enforced). */
+export function continueWithoutAccount() {
+  unlock();
+}
+
 /** After password change / sign-out-everywhere. */
 export function forceLock(reason) {
   view = 'signin';
@@ -194,6 +205,7 @@ function mountScreen(reason) {
           ? '<button type="button" class="linklike" id="auth-toggle">Need an account? Create one</button>'
           : '<span class="auth-note">Accounts are closed. To allow creating one, the server owner must set <code>SIGNUP_CODE</code> in the server environment and restart.</span>'
     }</div>
+    ${state.auth.mode !== 'session' ? '<div class="auth-alt"><button type="button" class="linklike" id="auth-skip">Continue without an account (open dashboard)</button></div>' : ''}
   </main>`;
   wire();
   const first = screen.querySelector('input');
@@ -284,6 +296,7 @@ async function submit(form, ctx, path, body, errMap) {
 }
 
 function wire() {
+  $('auth-skip')?.addEventListener('click', () => continueWithoutAccount());
   const t = $('auth-toggle');
   if (t)
     t.addEventListener('click', () => {

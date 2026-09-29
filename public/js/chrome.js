@@ -1,5 +1,5 @@
 import { api, getToken, onUnauthorized, setToken } from './api.js';
-import { signOut, updateAccountChrome } from './auth.js';
+import { openSignup, signOut, updateAccountChrome } from './auth.js';
 import { refresh } from './data.js';
 import { mountSettings } from './settings.js';
 import { hooks, $, setText, state } from './state.js';
@@ -18,7 +18,13 @@ export function updateAuthUI() {
   const b = $('btn-auth');
   if (!b) return;
   updateAccountChrome();
-  b.hidden = !state.auth.required || state.auth.mode === 'session';
+  const firstRun = state.auth.setupRequired && state.auth.mode !== 'session';
+  b.hidden = !(state.auth.required || firstRun) || state.auth.mode === 'session';
+  if (firstRun && !getToken()) {
+    b.textContent = 'Create account';
+    b.setAttribute('aria-label', 'Create the owner account');
+    return;
+  }
   b.textContent = getToken() ? 'Sign out' : 'Sign in';
   b.setAttribute('aria-label', getToken() ? 'Sign out (forget admin token)' : 'Sign in with admin token');
 }
@@ -46,6 +52,10 @@ export function navActive(page) {
 }
 
 export async function authClick() {
+  if (state.auth.setupRequired && state.auth.mode !== 'session' && !getToken()) {
+    openSignup();
+    return;
+  }
   if (getToken()) {
     setToken('');
     toast('Signed out — the admin token was removed from this browser', 'info');
