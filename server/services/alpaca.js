@@ -66,6 +66,12 @@ async function alpacaFetch(urlPath, { data = true } = {}) {
   return res.json();
 }
 
+// Alpaca defaults `start` to the current day, which yields too few bars on
+// weekends / pre-market. Ask for a window and take the newest bars (sort=desc).
+function lookbackStart(days = 30) {
+  return new Date(Date.now() - days * 86400_000).toISOString();
+}
+
 function isCrypto(symbol) {
   return symbol.includes('/') || symbol.endsWith('USD') && ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOGE', 'DOT', 'LTC', 'UNI', 'AAVE'].some((c) => symbol.startsWith(c));
 }
@@ -96,12 +102,14 @@ export const alpaca = {
         const q = new URLSearchParams({
           timeframe: timeframe === '1Hour' ? '1Hour' : timeframe,
           limit: String(limit),
+          start: lookbackStart(),
+          sort: 'desc',
         });
         const data = await alpacaFetch(`/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(sym)}&${q}`);
         const bars = data.bars?.[sym] || data.bars?.[symbol] || [];
         if (!bars.length) throw new Error('no bars returned');
         fallbacks.delete(symbol);
-        return bars.map((b) => ({
+        return bars.reverse().map((b) => ({
           t: b.t,
           o: b.o,
           h: b.h,
@@ -116,11 +124,13 @@ export const alpaca = {
         limit: String(limit),
         adjustment: 'split',
         feed: 'iex',
+        start: lookbackStart(),
+        sort: 'desc',
       });
       const data = await alpacaFetch(`/v2/stocks/${encodeURIComponent(symbol)}/bars?${q}`);
       if (!data.bars?.length) throw new Error('no bars returned');
       fallbacks.delete(symbol);
-      return data.bars.map((b) => ({
+      return data.bars.reverse().map((b) => ({
         t: b.t,
         o: b.o,
         h: b.h,

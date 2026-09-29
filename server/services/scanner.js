@@ -29,6 +29,10 @@ export async function runMarketScan({ force = false } = {}) {
         const { bars } = await alpaca.getSnapshot(symbol);
         if (!bars || bars.length < 30) {
           failed += 1;
+          store.addLog({
+            level: 'warn',
+            message: `scan skip ${symbol}: only ${bars?.length || 0} bars (need 30)`,
+          });
           continue;
         }
         const pred = predictFromBars(symbol, bars);
