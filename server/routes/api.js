@@ -3,8 +3,10 @@ import { store } from '../db/store.js';
 import { alpaca } from '../services/alpaca.js';
 import { runMarketScan, ensureTodayWatchlist } from '../services/scanner.js';
 import { evaluateOpenPredictions, getAccuracyStats } from '../services/evaluator.js';
-import { config, hasAlpacaCredentials } from '../config.js';
+import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
 import { trainFromOutcomes } from '../services/trainer.js';
+import { startAiRun, runState } from '../services/aiRun.js';
+import { listPositions, closeManually } from '../services/positions.js';
 
 const router = Router();
 
@@ -14,9 +16,33 @@ router.get('/health', (_req, res) => {
     tradingEnabled: false,
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
+    openrouterConfigured: hasOpenRouterKey(),
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),
   });
+});
+
+router.post('/run', (_req, res) => {
+  const started = startAiRun();
+  res.status(started ? 202 : 200).json({ started, ...runState });
+});
+
+router.get('/run/status', (_req, res) => res.json(runState));
+
+router.get('/ai/picks', (_req, res) => res.json(store.getAiPicks()));
+
+router.get('/positions', async (_req, res) => {
+  try {
+    res.json(await listPositions());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/positions/:id/close', async (req, res) => {
+  const p = await closeManually(req.params.id).catch(() => null);
+  if (!p) return res.status(404).json({ error: 'open position not found' });
+  res.json(p);
 });
 
 router.get('/status', (_req, res) => {

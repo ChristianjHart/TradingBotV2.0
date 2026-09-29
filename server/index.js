@@ -9,6 +9,7 @@ import { store } from './db/store.js';
 import { runMarketScan } from './services/scanner.js';
 import { evaluateOpenPredictions } from './services/evaluator.js';
 import { alpaca } from './services/alpaca.js';
+import { monitorPositions } from './services/positions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -61,6 +62,8 @@ cron.schedule('*/15 * * * *', async () => {
     store.addLog({ level: 'error', message: `evaluate failed: ${err.message}` });
   }
 });
+
+cron.schedule('*/5 * * * *', () => monitorPositions().catch(() => {}));
 
 const host = process.env.HOST || '0.0.0.0';
 app.listen(config.port, host, () => {

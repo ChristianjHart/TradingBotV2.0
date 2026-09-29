@@ -17,6 +17,14 @@ export const config = {
     baseUrl: process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets',
     dataUrl: process.env.ALPACA_DATA_URL || 'https://data.alpaca.markets',
   },
+  openrouter: {
+    key: process.env.OPENROUTER_API_KEY || '',
+    baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    scannerModel: process.env.SCANNER_MODEL || 'deepseek/deepseek-v3.1-terminus',
+    traderModel: process.env.TRADER_MODEL || 'deepseek/deepseek-chat-v3.1',
+  },
+  paperEquity: Number(process.env.PAPER_EQUITY || 100000),
+  maxOpenPositions: Number(process.env.MAX_OPEN_POSITIONS || 10),
   scanIntervalMinutes: Number(process.env.SCAN_INTERVAL_MINUTES || 30),
   watchlistSize: Number(process.env.WATCHLIST_SIZE || 12),
   predictionHorizonHours: Number(process.env.PREDICTION_HORIZON_HOURS || 24),
@@ -28,4 +36,8 @@ export const config = {
 
 export function hasAlpacaCredentials() {
   return Boolean(config.alpaca.key && config.alpaca.secret);
+}
+
+export function hasOpenRouterKey() {
+  return Boolean(config.openrouter.key);
 }

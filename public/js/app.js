@@ -10,6 +10,10 @@ const state = {
   indicators: { vol: true, vwap: true, ema9: true, ema21: true },
   bars: [],
   tvWidget: null,
+  picks: null,
+  positions: null,
+  selectedPos: null,
+  runStage: null,
 };
 
 function setWorkerUI(worker) {
@@ -79,7 +83,7 @@ function renderDashboard() {
           <button class="tab-add" type="button">+</button>
         </div>
         <div class="toolbar-actions">
-          <button class="btn-ghost" id="btn-scan" type="button">RUN SCAN</button>
+          <button class="btn-ghost" id="btn-scan" type="button">RUN</button>
           <button class="btn-ghost" type="button">ADD WIDGET</button>
           <button class="btn-ghost" type="button">EDIT LAYOUT</button>
         </div>
@@ -211,25 +215,15 @@ function renderDashboard() {
           </div>
         </section>
       </div>
+      ${aiSectionHtml()}
     </div>
   `;
 
   drawAccuracyChart(document.getElementById('acc-chart'), acc.series || []);
+  drawPositionChart();
 
-  document.getElementById('btn-scan')?.addEventListener('click', async () => {
-    const btn = document.getElementById('btn-scan');
-    btn.textContent = 'SCANNING…';
-    btn.disabled = true;
-    try {
-      await api('/scan', { method: 'POST' });
-      await refresh();
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      btn.textContent = 'RUN SCAN';
-      btn.disabled = false;
-    }
-  });
+  document.getElementById('btn-scan')?.addEventListener('click', runAiPipeline);
+  bindAiWidgets();
 
   root.querySelectorAll('[data-goto]').forEach((el) => {
     el.addEventListener('click', () => navigate(el.dataset.goto));
@@ -239,6 +233,141 @@ function renderDashboard() {
     el.addEventListener('click', () => {
       state.selectedSymbol = el.dataset.sym;
       navigate('market');
+    });
+  });
+}
+
+function runButtonLabel() {
+  const stage = state.runStage;
+  if (stage === 'scanning') return 'SCANNER BOT…';
+  if (stage === 'trading') return 'TRADER BOT…';
+  return 'RUN';
+}
+
+async function runAiPipeline() {
+  const btn = document.getElementById('btn-scan');
+  if (btn) btn.disabled = true;
+  try {
+    await api('/run', { method: 'POST' });
+    for (;;) {
+      const st = await api('/run/status');
+      state.runStage = st.running ? st.stage : null;
+      if (btn) btn.textContent = runButtonLabel();
+      if (st.stage === 'trading' || !st.running) {
+        await refresh();
+        render();
+      }
+      if (!st.running) {
+        if (st.error) alert(`Run failed: ${st.error}`);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    state.runStage = null;
+    const b = document.getElementById('btn-scan');
+    if (b) {
+      b.textContent = 'RUN';
+      b.disabled = false;
+    }
+  }
+}
+
+function aiSectionHtml() {
+  const picks = state.picks?.picks || [];
+  const pos = state.positions;
+  const open = pos?.open || [];
+  const acct = pos?.account;
+  const sel = open.find((p) => p.id === state.selectedPos) || open[0];
+  if (sel) state.selectedPos = sel.id;
+  const badge = state.picks?.source === 'ai' ? `AI · ${escapeHtml(state.picks.model || '')}` : picks.length ? 'RULE-BASED (no OpenRouter key)' : '';
+
+  return `
+    <div class="grid grid-ai">
+      <section class="widget ai-picks">
+        <div class="widget-title"><span>AI TOP ${picks.length || 100} PICKS</span><span class="dim">${badge}</span></div>
+        ${
+          picks.length
+            ? `<div class="scroll-y"><table class="table">
+          <thead><tr><th>#</th><th>SYMBOL</th><th>DIR</th><th>CONF</th><th>REASON</th></tr></thead>
+          <tbody>${picks
+            .map(
+              (p, i) => `<tr>
+              <td class="dim mono">${i + 1}</td>
+              <td class="sym">${escapeHtml(p.symbol)}</td>
+              <td><span class="pill pill-${p.direction}">${p.direction}</span></td>
+              <td class="mono">${(p.confidence * 100).toFixed(0)}%</td>
+              <td class="reason">${escapeHtml(p.reason)}</td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+            : `<div class="empty">Press RUN — the scanner bot will rank the top 100 symbols</div>`
+        }
+      </section>
+
+      <section class="widget ai-positions">
+        <div class="widget-title"><span>OPEN POSITIONS (SIMULATED)</span>
+          <span class="dim mono">${acct ? `equity ${fmtMoney(acct.equity, 0)} · cash ${fmtMoney(acct.cash, 0)} · P&L ${fmtMoney(acct.realizedPnl + acct.unrealizedPnl, 0)}` : ''}</span></div>
+        ${
+          open.length
+            ? `<div class="scroll-y short"><table class="table">
+          <thead><tr><th>SYMBOL</th><th>SIDE</th><th>ALLOC</th><th>ENTRY</th><th>STOP</th><th>TARGET</th><th>P&L</th><th></th></tr></thead>
+          <tbody>${open
+            .map(
+              (p) => `<tr class="pos-row ${p.id === state.selectedPos ? 'sel' : ''}" data-pos="${p.id}" title="${escapeHtml(p.reason)}">
+              <td class="sym">${escapeHtml(p.symbol)}</td>
+              <td><span class="pill pill-${p.side}">${p.side}</span></td>
+              <td class="mono">${fmtMoney(p.allocation, 0)}</td>
+              <td class="mono">${fmtMoney(p.entry)}</td>
+              <td class="mono neg">${fmtMoney(p.stopLoss)}</td>
+              <td class="mono pos">${fmtMoney(p.takeProfit)}</td>
+              <td class="mono ${clsPos(p.pnl)}">${fmtMoney(p.pnl)} <span class="dim">${fmtPct(p.pnlPct)}</span></td>
+              <td><button class="btn-close" data-close="${p.id}" type="button">Close</button></td></tr>`,
+            )
+            .join('')}</tbody></table></div>
+          <div class="pos-chart-head">${sel ? `${escapeHtml(sel.symbol)} · ${sel.side.toUpperCase()} — <span class="dim">${escapeHtml(sel.reason)}</span>` : ''}</div>
+          <canvas id="pos-chart"></canvas>`
+            : `<div class="empty">No open positions — the trader bot opens up to 10 after each run</div>`
+        }
+      </section>
+    </div>`;
+}
+
+async function drawPositionChart() {
+  const canvas = document.getElementById('pos-chart');
+  const sel = (state.positions?.open || []).find((p) => p.id === state.selectedPos);
+  if (!canvas || !sel) return;
+  try {
+    const { bars } = await api(`/market/bars/${encodeURIComponent(sel.symbol)}?limit=100`);
+    drawCandleChart(document.getElementById('pos-chart'), bars, {
+      ema9: true,
+      ema21: true,
+      levels: [
+        { price: sel.takeProfit, label: 'TARGET', color: '#22c55e', dash: true },
+        { price: sel.entry, label: 'ENTRY', color: '#e5e7eb', dash: false },
+        { price: sel.stopLoss, label: 'STOP', color: '#ef4444', dash: true },
+      ],
+    });
+  } catch {
+    /* chart is best-effort */
+  }
+}
+
+function bindAiWidgets() {
+  root.querySelectorAll('[data-pos]').forEach((row) => {
+    row.addEventListener('click', () => {
+      state.selectedPos = row.dataset.pos;
+      render();
+    });
+  });
+  root.querySelectorAll('[data-close]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Close this simulated position at the current price?')) return;
+      await api(`/positions/${btn.dataset.close}/close`, { method: 'POST' });
+      await refresh();
+      render();
     });
   });
 }
@@ -753,7 +882,14 @@ export function navigate(page) {
 }
 
 async function refresh() {
-  const [dashboard, status] = await Promise.all([api('/dashboard'), api('/status')]);
+  const [dashboard, status, picks, positions] = await Promise.all([
+    api('/dashboard'),
+    api('/status'),
+    api('/ai/picks').catch(() => null),
+    api('/positions').catch(() => null),
+  ]);
+  state.picks = picks;
+  state.positions = positions;
   state.dashboard = dashboard;
   state.status = status;
   setWorkerUI(status.worker);

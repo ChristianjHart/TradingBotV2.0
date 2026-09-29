@@ -80,3 +80,12 @@ The app only uses Alpaca for **market data**. Order endpoints are never called.
 - File-backed JSON store in `data/`
 - Vanilla SPA frontend matching the classic dark tradingbot chrome
 - `node-cron` for periodic scan + evaluate cycles
+
+## AI run (OpenRouter)
+
+Press **RUN** on the dashboard:
+
+1. **Scanner bot** (`SCANNER_MODEL`, default `deepseek/deepseek-v3.1-terminus`) screens ~120 stocks/ETFs/crypto and returns the top 100 as JSON `{symbol, direction, confidence, reason}` → shown in *AI TOP 100 PICKS*.
+2. **Trader bot** (`TRADER_MODEL`, default `deepseek/deepseek-chat-v3.1`) reviews those picks and opens up to 10 **simulated** positions, each with an allocation, stop-loss and take-profit (risk-capped server-side). They appear under *OPEN POSITIONS* with entry/stop/target lines on the chart. Stops/targets are checked every 5 minutes.
+
+Set `OPENROUTER_API_KEY` to enable the models; without it the same flow runs on the built-in rule-based scorer. No real orders are ever placed.

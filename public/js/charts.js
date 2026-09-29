@@ -48,8 +48,9 @@ export function drawCandleChart(canvas, bars, indicators = {}) {
   const slice = bars.slice(-80);
   const highs = slice.map((b) => b.h);
   const lows = slice.map((b) => b.l);
-  let min = Math.min(...lows);
-  let max = Math.max(...highs);
+  const levels = indicators.levels || [];
+  let min = Math.min(...lows, ...levels.map((l) => l.price));
+  let max = Math.max(...highs, ...levels.map((l) => l.price));
   const pad = (max - min) * 0.08 || 1;
   min -= pad;
   max += pad;
@@ -110,6 +111,27 @@ export function drawCandleChart(canvas, bars, indicators = {}) {
   drawLine(ema9, '#eab308');
   drawLine(ema21, '#3b82f6');
   drawLine(vwap, '#a855f7');
+
+  // trade levels (entry / stop-loss / take-profit)
+  levels.forEach((l) => {
+    const y = yAt(l.price);
+    ctx.save();
+    ctx.setLineDash(l.dash ? [6, 4] : []);
+    ctx.strokeStyle = l.color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    ctx.restore();
+    ctx.font = '10px IBM Plex Sans, sans-serif';
+    const text = `${l.label} ${l.price.toFixed(2)}`;
+    const tw = ctx.measureText(text).width + 8;
+    ctx.fillStyle = l.color;
+    ctx.fillRect(padL + 4, y - 14, tw, 13);
+    ctx.fillStyle = '#0b0c0e';
+    ctx.fillText(text, padL + 8, y - 4);
+  });
 
   // volume
   if (indicators.vol) {
