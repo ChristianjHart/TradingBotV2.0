@@ -21,9 +21,24 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Deploy on Render
+
+1. Push this repo to GitHub.
+2. In [Render](https://render.com) → **New** → **Blueprint** (uses `render.yaml`), or **Web Service** and point at the repo.
+3. Settings if creating manually:
+   - **Runtime:** Node
+   - **Build:** `npm install`
+   - **Start:** `npm start`
+   - **Health check:** `/api/health`
+4. Env vars (optional for a first mock-data test — defaults work):
+   - `USE_MOCK_DATA=true` for a smoke test with no keys
+   - Or set `ALPACA_API_KEY`, `ALPACA_API_SECRET`, and `USE_MOCK_DATA=false` for live scans
+
+Render sets `PORT` automatically. Note: free instances sleep when idle, and the local `data/` store is **ephemeral** (resets on redeploy / disk wipe) unless you add a persistent disk.
+
 ### Alpaca (optional but recommended)
 
-Add paper keys to `.env`:
+Add paper keys to `.env` (or Render env):
 
 ```
 ALPACA_API_KEY=...
