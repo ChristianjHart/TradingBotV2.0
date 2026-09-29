@@ -4,6 +4,13 @@ import { fileURLToPath } from 'url';
 
 dotenv.config();
 
+/** Env lookup tolerant of case (e.g. `OpenRouter_API_KEY` vs `OPENROUTER_API_KEY`). */
+export function envAny(name) {
+  if (process.env[name]) return process.env[name];
+  const hit = Object.keys(process.env).find((k) => k.toUpperCase() === name.toUpperCase());
+  return hit ? process.env[hit] : '';
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 
@@ -18,7 +25,7 @@ export const config = {
     dataUrl: process.env.ALPACA_DATA_URL || 'https://data.alpaca.markets',
   },
   openrouter: {
-    key: process.env.OPENROUTER_API_KEY || '',
+    key: envAny('OPENROUTER_API_KEY'),
     baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     scannerModel: process.env.SCANNER_MODEL || 'deepseek/deepseek-v3.1-terminus',
     traderModel: process.env.TRADER_MODEL || 'deepseek/deepseek-chat-v3.1',

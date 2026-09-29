@@ -284,7 +284,19 @@ function aiSectionHtml() {
   if (sel) state.selectedPos = sel.id;
   const badge = state.picks?.source === 'ai' ? `AI · ${escapeHtml(state.picks.model || '')}` : picks.length ? 'RULE-BASED (no OpenRouter key)' : '';
 
+  const st = state.status || {};
+  const run = st.run || {};
+  const runLine = run.error
+    ? `<span class="neg">Last run FAILED: ${escapeHtml(run.error)}</span>`
+    : run.stage === 'done'
+      ? `Last run: ${run.picks} picks · ${run.opened} position(s) opened`
+      : run.running
+        ? `Running: ${run.stage}…`
+        : 'No run since the server started';
+  const flags = `OpenRouter key: ${st.openrouterConfigured ? 'yes' : '<span class="neg">MISSING</span>'} · Supabase: ${st.supabaseConfigured ? 'yes' : 'no'} · Data: ${escapeHtml(st.dataMode || '?')}`;
+
   return `
+    <div class="run-status">${runLine} <span class="dim">— ${flags}</span></div>
     <div class="grid grid-ai">
       <section class="widget ai-picks">
         <div class="widget-title"><span>AI TOP ${picks.length || 100} PICKS</span><span class="dim">${badge}</span></div>

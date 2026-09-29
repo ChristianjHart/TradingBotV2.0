@@ -1,7 +1,9 @@
 // Minimal Supabase (PostgREST) client — no SDK dependency. Server-side only (service-role key).
 // Writes are queued and flushed in batches; failures never break the app.
-const URL_ = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+import { envAny } from '../config.js';
+
+const URL_ = envAny('SUPABASE_URL').replace(/\/+$/, '');
+const KEY = envAny('SUPABASE_SERVICE_ROLE_KEY');
 
 export const supabaseEnabled = Boolean(URL_ && KEY);
 
