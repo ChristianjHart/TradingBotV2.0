@@ -1,6 +1,7 @@
 import { api, apiOptional, clsPos, escapeHtml as esc, fmtDateTime, fmtMoney } from './api.js';
 import { LineChart } from './charts.js';
 import { bannersHtml } from './dashboard.js';
+import { calibrationBar } from './run-logic.js';
 import { $, charts, empty, pctOf, root, setHtml, skeleton, state } from './state.js';
 
 /* ---------- performance ---------- */
@@ -70,9 +71,7 @@ export function patchPerf() {
     cal.length
       ? `<ul class="calib">${cal
           .map((c) => {
-            const m = String(c.bucket).match(/(\d+)\D+(\d+)/);
-            const mid = m ? (Number(m[1]) + Number(m[2])) / 2 : null;
-            const hr = pctOf(c.hitRate) ?? 0;
+            const { mid, hitRate: hr } = calibrationBar(c);
             return `<li><span class="calib-l mono">${esc(c.bucket)}</span><span class="calib-bar" role="img" aria-label="${esc(c.bucket)} confidence: hit rate ${hr.toFixed(0)}% over ${c.n} picks"><span class="calib-fill" style="width:${Math.min(100, hr)}%"></span>${mid != null ? `<span class="calib-ideal" style="left:${mid}%" title="Perfect calibration"></span>` : ''}</span><span class="calib-v mono">${hr.toFixed(0)}% <span class="dim">n=${c.n}</span></span></li>`;
           })
           .join('')}</ul><div class="dim calib-note">Bar = actual hit rate; tick = stated confidence. Bars left of the tick mean the model is overconfident.</div>`

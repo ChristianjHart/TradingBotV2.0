@@ -3,7 +3,8 @@ import { config, hasOpenRouterKey } from '../config.js';
 import { store } from '../db/store.js';
 import { getAccount, openPosition, livePrices } from './positions.js';
 import { applySlippage, feeFor } from './fills.js';
-import { limitsFrom, dailyPnl, isHalted, checkEntry } from './risk.js';
+import { limitsFrom, todaysPnl, isHalted, checkEntry } from './risk.js';
+import { validSymbol } from '../middleware.js';
 import { isCrypto } from './market.js';
 import { alpaca } from './alpaca.js';
 
@@ -15,9 +16,17 @@ Decide which candidates are actually worth trading and choose AT MOST the given 
 Rules: crypto can only be traded long (never short crypto); stopLoss must be below entry for longs and above entry for shorts; takeProfit the opposite; aim for reward:risk of at least 1.5; keep total allocation within available cash; no single trade above ${MAX_POSITION_PCT * 100}% of equity. Use the free slots when there are enough acceptable setups: skip only clearly weak ones, and spread capital across trades (roughly cash divided by the number of trades you take, adjusted up or down for setup quality). Do not stop at a handful of trades if more candidates are reasonable.
 The desk enforces portfolio limits (gross/asset-class exposure, sector concentration, daily loss halt), so prefer diversified picks. Reply with ONLY JSON: {"summary":"1-2 sentences on why you chose these trades and what you passed on","trades":[{"symbol":"...","side":"long|short","allocationUsd":0,"stopLoss":0,"takeProfit":0,"reason":"..."}]}`;
 
+/** Confidence-weighted allocation weights (0.35 is the lowest confidence the rules emit, so 0.5 gets ~1/4 of a 0.96 pick's edge). */
+export function confidenceWeights(cands) {
+  const w = cands.map((c) => Math.max(0.05, (Number(c.confidence) || 0) - 0.35));
+  const sum = w.reduce((a, b) => a + b, 0) || 1;
+  return w.map((x) => x / sum);
+}
+
 function rulesTrades(cands, slots, cash) {
   const picks = cands.slice(0, slots);
-  return picks.map((c) => {
+  const weights = confidenceWeights(picks);
+  return picks.map((c, i) => {
     const atrAbs = c.price * ((c.atrPct || 1.5) / 100);
     const dir = c.direction === 'long' ? 1 : -1;
     return {
@@ -25,10 +34,42 @@ function rulesTrades(cands, slots, cash) {
       side: c.direction,
       stopLoss: c.price - dir * atrAbs * 2,
       takeProfit: c.price + dir * atrAbs * 3.5,
-      allocationUsd: (cash * 0.95) / picks.length, // equal split; risk-capped below
+      allocationUsd: cash * 0.95 * weights[i], // confidence-weighted split; per-trade, risk and portfolio caps applied below
       reason: `rule-based: ${c.reason}`,
     };
   });
+}
+
+const MAX_PROPOSED = 100;
+const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const num = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? (Number.isFinite(Number(v)) ? Number(v) : undefined) : undefined);
+
+/**
+ * Defensive parse of the trader LLM's JSON. Returns { trades, dropped, summary } or null when the overall shape is
+ * unusable (not an object, `trades` not an array, or every entry was garbage) so the caller falls back to rules.
+ * Kept entries are plain objects with a string symbol and side; numeric fields become finite numbers or undefined
+ * (missing levels are repaired later). At most MAX_PROPOSED entries are looked at.
+ */
+export function sanitizeTrades(json) {
+  if (!isPlain(json) || !Array.isArray(json.trades)) return null;
+  const trades = [];
+  let dropped = Math.max(0, json.trades.length - MAX_PROPOSED);
+  for (const t of json.trades.slice(0, MAX_PROPOSED)) {
+    if (!isPlain(t) || typeof t.symbol !== 'string' || !validSymbol(t.symbol) || typeof t.side !== 'string') {
+      dropped++;
+      continue;
+    }
+    trades.push({
+      symbol: t.symbol,
+      side: t.side.toLowerCase(),
+      allocationUsd: num(t.allocationUsd),
+      stopLoss: num(t.stopLoss),
+      takeProfit: num(t.takeProfit),
+      reason: typeof t.reason === 'string' ? t.reason.slice(0, 300) : '',
+    });
+  }
+  if (!trades.length && dropped > 0) return null;
+  return { trades, dropped, summary: typeof json.summary === 'string' ? json.summary.slice(0, 500) : '' };
 }
 
 /** Validate/clamp whatever the model proposed, then open simulated positions. */
@@ -45,11 +86,19 @@ export async function runTraderBot(picks, { regime } = {}) {
     return { source: 'none', opened: [], skippedList: [], note: slots ? 'no candidates to trade' : 'all position slots are full' };
   }
 
+  const workerStatus = store.getWorker().status;
+  if (workerStatus === 'stopped' || workerStatus === 'killed') {
+    const note = `worker is ${workerStatus} — no new positions are opened (exits are still managed by the monitor)`;
+    store.addLog({ level: 'warn', message: `trader bot: ${note}` });
+    return { source: 'none', opened: [], skippedList: [], note, workerStatus };
+  }
+
   const settings = store.getSettings();
   const limits = limitsFrom(settings);
   const prices = await livePrices(open);
   const account = getAccount(prices);
-  if (isHalted(dailyPnl(store.getPositions(), account.unrealizedPnl), account.equity, limits)) {
+  const pnlToday = todaysPnl(account.equity);
+  if (isHalted(pnlToday, account.equity, limits)) {
     const note = `daily loss halt: today's P&L is below -${settings.dailyLossHaltPct}% of equity — no new trades`;
     store.addLog({ level: 'warn', message: `trader bot: ${note}` });
     return { source: 'none', opened: [], skippedList: [], note, halted: true };
@@ -80,8 +129,11 @@ export async function runTraderBot(picks, { regime } = {}) {
         maxTokens: 4000,
         timeoutMs: 90_000,
       });
-      proposed = json.trades || [];
-      note = String(json.summary || '').slice(0, 500);
+      const clean = sanitizeTrades(json);
+      if (!clean) throw new Error('model returned an unusable JSON shape');
+      if (clean.dropped) store.addLog({ level: 'warn', message: `trader bot: dropped ${clean.dropped} malformed trade entries from the model` });
+      proposed = clean.trades;
+      note = clean.summary;
     } catch (err) {
       store.addLog({ level: 'warn', message: `trader bot AI failed (${err.message}) — using rule-based fallback` });
     }
@@ -149,8 +201,10 @@ export async function runTraderBot(picks, { regime } = {}) {
 
     let alloc = Number(t.allocationUsd);
     if (!Number.isFinite(alloc)) alloc = Infinity;
+    // Loss if the stop is hit = stop distance + exit slippage + entry and exit fees (all as a fraction of allocation).
+    const lossFrac = riskDist + (settings.slippageBps + 2 * settings.feeBps) / 10_000;
     // Leave room in cash for the entry fee (paid on top of the allocation).
-    alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / riskDist, cash / (1 + settings.feeBps / 10_000));
+    alloc = Math.min(alloc, account.equity * MAX_POSITION_PCT, (account.equity * MAX_RISK_PCT) / lossFrac, cash / (1 + settings.feeBps / 10_000));
     const gate = checkEntry({ open: [...open, ...opened], equity: account.equity, symbol: t.symbol, alloc, limits });
     if (!gate.ok) {
       skipped.push(`${t.symbol} (${gate.reason})`);

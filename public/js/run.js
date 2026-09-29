@@ -1,15 +1,13 @@
 import { api, apiOptional, escapeHtml as esc, fmtDuration } from './api.js';
 import { refresh } from './data.js';
 import { hooks, $, nowMs, setHtml, setText, state } from './state.js';
+import { STEPS, stepperState } from './run-logic.js';
 import { toast } from './ui.js';
+
+export { STEPS };
 
 /* ---------- run pipeline ---------- */
 
-export const STEPS = [
-  { id: 'fetching', label: 'Fetch market data', hint: 'downloading bars' },
-  { id: 'scanning', label: 'Scanner bot', hint: 'AI can take 1–3 min' },
-  { id: 'trading', label: 'Trader bot', hint: 'sizing & simulating trades' },
-];
 export let runTracking = false;
 
 export function isRunning() {
@@ -18,14 +16,10 @@ export function isRunning() {
 
 export function runBarHtml() {
   const r = state.run;
-  if (!r || !r.startedAt || r.stage === 'idle') return '';
-  const idx = STEPS.findIndex((s) => s.id === r.stage);
-  const errIdx = Math.max(0, STEPS.findIndex((s) => s.id === state.runLastStage));
-  const steps = STEPS.map((s, i) => {
-    let st = 'pending';
-    if (r.stage === 'done') st = 'done';
-    else if (r.stage === 'error') st = i < errIdx ? 'done' : i === errIdx ? 'error' : 'pending';
-    else if (idx >= 0) st = i < idx ? 'done' : i === idx ? 'active' : 'pending';
+  const v = stepperState(r, nowMs(), state.runLastStage);
+  if (!v.visible) return '';
+  const steps = v.steps.map((s, i) => {
+    const st = s.state;
     const icon = { done: '✓', error: '!', active: '', pending: String(i + 1) }[st];
     const sr = { done: 'complete', error: 'failed', active: 'in progress', pending: 'pending' }[st];
     return `<li class="step step-${st}" ${st === 'active' ? 'aria-current="step"' : ''}>
@@ -33,9 +27,9 @@ export function runBarHtml() {
       <span class="step-txt"><strong>${s.label}</strong><small>${st === 'active' ? esc(s.hint) : ''}<span class="sr-only"> ${sr}</span></small></span></li>`;
   }).join('');
   const tail =
-    r.stage === 'error'
+    v.kind === 'error'
       ? `<span class="neg">Run failed: ${esc(r.error || 'unknown error')}</span>`
-      : r.stage === 'done'
+      : v.kind === 'done'
         ? `<span class="pos">Done — ${r.picks ?? 0} picks, ${r.opened ?? 0} position(s) opened</span>`
         : state.runLocal === false
           ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded) — RUN is disabled until it finishes.</span>'
@@ -73,7 +67,8 @@ export async function startRun() {
     patchRunBar();
     trackRun();
   } catch (e) {
-    toast(`Could not start run: ${e.message}`, 'error');
+    if (e.status === 409) toast('Worker is stopped — press START', 'error');
+    else toast(`Could not start run: ${e.message}`, 'error');
   }
 }
 

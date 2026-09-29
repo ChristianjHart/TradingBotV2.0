@@ -1,6 +1,7 @@
 import { api, clsPos, escapeHtml as esc, fmtDateTime, fmtDuration, fmtMoney, fmtPct } from './api.js';
 import { CandleChart, aggregateBars } from './charts.js';
 import { refresh } from './data.js';
+import { progressOf, riskOf, sortRows } from './run-logic.js';
 import { drawMarketChart } from './market.js';
 import { hooks, $, EXIT_LABEL, barsCache, charts, empty, nowMs, savePrefs, setCls, setHtml, setText, skeleton, state } from './state.js';
 import { confirmDialog, toast } from './ui.js';
@@ -19,15 +20,7 @@ export const COLS = [
   { key: 'left', label: 'TIME LEFT', get: (p) => (p.expiresAt ? new Date(p.expiresAt).getTime() : Infinity) },
 ];
 
-export function progressOf(p) {
-  const price = p.price ?? p.entry;
-  const span = p.takeProfit - p.stopLoss;
-  if (!span) return 0.5;
-  return Math.min(1, Math.max(0, (price - p.stopLoss) / span));
-}
-export function riskOf(p) {
-  return Math.abs(p.entry - p.stopLoss) * (p.qty ?? p.allocation / p.entry);
-}
+export { progressOf, riskOf };
 export function findPos(id) {
   const o = state.positions?.open?.find((p) => p.id === id);
   if (o) return { p: o, open: true };
@@ -36,17 +29,8 @@ export function findPos(id) {
 }
 
 export function sortedOpen() {
-  const open = [...(state.positions?.open || [])];
   const col = COLS.find((c) => c.key === state.sort.key) || COLS[7];
-  const dir = state.sort.dir === 'asc' ? 1 : -1;
-  return open.sort((a, b) => {
-    const x = col.get(a);
-    const y = col.get(b);
-    if (x === y) return 0;
-    if (x == null) return 1;
-    if (y == null) return -1;
-    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * dir;
-  });
+  return sortRows(state.positions?.open || [], col.get, state.sort.dir);
 }
 
 export function openHeadHtml() {

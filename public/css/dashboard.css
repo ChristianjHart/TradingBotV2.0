@@ -1056,6 +1056,8 @@ th[aria-sort="ascending"] .th-btn, th[aria-sort="descending"] .th-btn { color: v
   .widget.tv { grid-column: auto; grid-row: auto; }
 }
 @media (max-width: 700px) {
+  .grid-market { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .grid-market .widget.chart-custom, .grid-market .widget.watchlist, .grid-market .widget.tv { grid-column: 1; grid-row: auto; min-width: 0; }
   .page { padding: 10px 10px 24px; }
   .perf-cards { grid-template-columns: 1fr 1fr; }
   .chart-box.tall { height: 300px; }
@@ -1114,3 +1116,11 @@ th[aria-sort="ascending"] .th-btn, th[aria-sort="descending"] .th-btn { color: v
 .chart-data th, .chart-data td { text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--border-soft); }
 .chart-data th:first-child, .chart-data td:first-child { text-align: left; }
 .chart-data .scroll-y { max-height: 200px; }
+
+/* market: inline chart message, watchlist filter, TradingView gate */
+.grid-market .widget { min-width: 0; }
+.chart-msg { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--ctrl-border); font-size: 12px; color: #fde68a; background: rgba(234, 179, 8, 0.1); overflow-wrap: anywhere; }
+.watch-all { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+.tv-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; font-size: 12px; }
+.tv-gate[hidden], .tv-frame[hidden] { display: none; }
+.widget.tv:has(#tv-gate:not([hidden])) { min-height: 0; }

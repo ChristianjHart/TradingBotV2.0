@@ -1,3 +1,4 @@
+import { aggregateBars } from './run-logic.js';
 /** Canvas charts: candlesticks (crosshair/tooltip/markers/live line) and a simple line chart. */
 
 const C = {
@@ -34,37 +35,7 @@ function sma(values, period) {
 }
 
 /** Aggregate hourly bars to 4H / 1D buckets (client-side; the API returns hourly bars). */
-export function aggregateBars(bars, tf) {
-  if (tf === '1H' || !bars.length) return bars;
-  const out = [];
-  if (tf === '4H') {
-    for (let i = bars.length % 4; i < bars.length; i += 4) out.push(merge(bars.slice(i, i + 4)));
-    return out;
-  }
-  let cur = [];
-  let day = null;
-  for (const b of bars) {
-    const d = String(b.t).slice(0, 10);
-    if (day !== null && d !== day) {
-      out.push(merge(cur));
-      cur = [];
-    }
-    day = d;
-    cur.push(b);
-  }
-  if (cur.length) out.push(merge(cur));
-  return out;
-}
-function merge(g) {
-  return {
-    t: g[0].t,
-    o: g[0].o,
-    h: Math.max(...g.map((b) => b.h)),
-    l: Math.min(...g.map((b) => b.l)),
-    c: g[g.length - 1].c,
-    v: g.reduce((a, b) => a + (b.v || 0), 0),
-  };
-}
+export { aggregateBars };
 
 function fit(canvas) {
   const dpr = window.devicePixelRatio || 1;

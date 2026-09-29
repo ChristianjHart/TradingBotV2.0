@@ -76,7 +76,7 @@ export const setText = (el, t) => {
 export const setCls = (el, c) => {
   if (el && el.className !== c) el.className = c;
 };
-export const pctOf = (v) => (v == null ? null : Math.abs(v) <= 1 ? v * 100 : v); // tolerate fraction or percent
+export { pctOf } from './run-logic.js';
 export const skeleton = (n = 3) => `<div class="skel-wrap" aria-hidden="true">${Array.from({ length: n }, () => '<div class="skeleton"></div>').join('')}</div>`;
 export const empty = (msg) => `<div class="empty">${esc(msg)}</div>`;
 export const nowMs = () => Date.now();

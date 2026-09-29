@@ -13,7 +13,7 @@ export function expiryFor(openedAt, horizonHours = DEFAULT_HORIZON_H) {
  * The walk always restarts from the position's INITIAL stop and re-derives the ratchet from the bars, so
  * replaying already-processed bars on a later cycle can never trip a stop that was tightened later.
  * (Only when the full 120-bar window no longer reaches back to the open do we start from the persisted stop.)
- * Time exit: once `now >= expiresAt` the result has expired:true; it only exits (at the latest close)
+ * The entry bar counts only through its close (see below). Time exit: once `now >= expiresAt` the result has expired:true; it only exits (at the latest close)
  * when `fresh` is true, i.e. the latest bar is from a live session.
  * Returns { exit: {price, reason, at, market}|null, stopLoss, trailing, expired, expiresAt }. `market` exits pay slippage.
  */
@@ -28,6 +28,15 @@ export function simulateExit(p, bars, { now = Date.now(), breakEven = true, trai
   let trailing = covered ? false : Boolean(p.trailing);
   let best = p.entry; // best favourable price seen so far
   const seq = bars.filter((b) => new Date(b.t).getTime() >= opened);
+  // Entry bar (started before the open, still running/complete after it): its high/low may pre-date our entry, so
+  // only its CLOSE (a post-entry price) is usable. Conservative choice: treat it as a synthetic bar entry -> close, so a
+  // stop/target breached by the close is caught now instead of waiting a full bar, without inventing pre-entry hits.
+  const HOUR = 3600_000;
+  const eb = bars.find((b) => {
+    const t = new Date(b.t).getTime();
+    return t < opened && opened < t + HOUR;
+  });
+  if (eb && Number.isFinite(eb.c)) seq.unshift({ t: new Date(opened).toISOString(), o: p.entry, h: Math.max(p.entry, eb.c), l: Math.min(p.entry, eb.c), c: eb.c, v: 0 });
 
   for (const b of seq) {
     const stopHit = long ? b.l <= stop : b.h >= stop;

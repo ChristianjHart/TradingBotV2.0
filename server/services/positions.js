@@ -165,14 +165,19 @@ export function monitorPositions() {
 
 /**
  * Apply stop-loss / take-profit / trailing / time-exit rules to every open position.
- * Stock positions are skipped while their data is stale (market closed): no stop decisions on old prices.
- * Expired positions are flagged (expiredAt) immediately, but only time-exit on a fresh bar.
+ * Worker status does not matter here: the monitor ALWAYS manages exits (stopped/killed only blocks NEW opens,
+ * which happen exclusively in runs, see runTraderBot / POST /run). It never opens positions itself.
+ * Exits are evaluated on the last known real bars even when the quote is stale (closed market / thin symbol):
+ * a stop or target hit inside a real bar is a real event. Only the time exit (a market order at the last close)
+ * waits for a fresh bar. Positions whose data cannot be fetched are skipped (never priced from mock data) and
+ * reported in ONE log line per cycle. Expired positions are flagged (expiredAt) immediately.
  */
 async function runMonitor() {
   const settings = store.getSettings();
   const decisions = new Map(); // id -> patch
   const prices = {};
   const snapshot = store.getPositions().filter((p) => p.status === 'open');
+  const skipped = [];
   for (const p of snapshot) {
     try {
       const bars = await alpaca.getBars(p.symbol, { limit: 120 });
@@ -180,11 +185,14 @@ async function runMonitor() {
       const stale = alpaca.isStale(p.symbol);
       const r = simulateExit(p, bars, { breakEven: settings.breakEven, trailR: settings.trailR, fresh: !stale });
       const patch = { expired: r.expired, expiresAt: r.expiresAt };
-      if (!stale) Object.assign(patch, { stopLoss: r.stopLoss, trailing: r.trailing, exit: r.exit, checkedAt: new Date().toISOString() });
+      Object.assign(patch, { stopLoss: r.stopLoss, trailing: r.trailing, exit: r.exit, checkedAt: new Date().toISOString(), stale });
       decisions.set(p.id, patch);
     } catch (err) {
-      store.addLog({ level: 'warn', message: `monitor ${p.symbol}: ${err.message} (retrying next cycle)` });
+      skipped.push(`${p.symbol} (${err.message})`);
     }
+  }
+  if (skipped.length) {
+    store.addLog({ level: 'warn', message: `monitor: skipped ${skipped.length} position(s), market data unavailable: ${skipped.join('; ').slice(0, 600)} (retrying next cycle)` });
   }
   // Synchronous merge onto the latest store contents.
   const positions = store.getPositions();
@@ -202,6 +210,7 @@ async function runMonitor() {
     }
     if (d.checkedAt) {
       p.lastCheckedAt = d.checkedAt;
+      p.lastCheckedStale = Boolean(d.stale);
       if (d.stopLoss !== p.stopLoss || d.trailing !== p.trailing) {
         p.initialStop ??= p.stopLoss;
         p.stopLoss = +d.stopLoss.toFixed(4);

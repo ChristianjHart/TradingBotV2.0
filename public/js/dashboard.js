@@ -1,4 +1,5 @@
 import { clsPos, escapeHtml as esc, fmtMoney, fmtTime } from './api.js';
+import { donutGradient } from './run-logic.js';
 import { patchPerf, perfShellHtml } from './performance.js';
 import { applyPosTab, patchPositions, posClick, posKey, tfButtonsHtml, tfClick } from './positions.js';
 import { patchRunBar, startRun } from './run.js';
@@ -6,17 +7,7 @@ import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, s
 
 /* ---------- dashboard widgets ---------- */
 
-export function donutGradient(parts) {
-  const total = parts.reduce((s, p) => s + p.value, 0) || 1;
-  let acc = 0;
-  return `conic-gradient(${parts
-    .map((p) => {
-      const start = (acc / total) * 360;
-      acc += p.value;
-      return `${p.color} ${start}deg ${(acc / total) * 360}deg`;
-    })
-    .join(', ')})`;
-}
+export { donutGradient };
 
 export function summaryHtml() {
   const sm = state.summary;

@@ -3,6 +3,25 @@ import { loggedFetch } from './http.js';
 import { validateBars } from './bars.js';
 import { isCrypto, assetClassOf, isStale } from './market.js';
 
+/** Live market data could not be fetched. Never substituted with mock data; callers skip the symbol. */
+export class MarketDataError extends Error {
+  constructor(symbol, cause) {
+    super(`market data unavailable for ${symbol}: ${cause}`);
+    this.name = 'MarketDataError';
+    this.code = 'market_data_unavailable';
+    this.status = 502;
+    this.symbol = symbol;
+  }
+}
+
+/** Set on a Map, evicting the oldest entries beyond `max` (insertion order; re-setting refreshes recency). */
+export function setCapped(map, key, value, max) {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > max) map.delete(map.keys().next().value);
+}
+const MAX_CACHE = 600;
+
 function seed(symbol) {
   let h = 0;
   for (let i = 0; i < symbol.length; i++) h = (h * 31 + symbol.charCodeAt(i)) >>> 0;
@@ -112,7 +131,7 @@ async function fetchBatch(symbols, timeframe) {
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map(); // `${symbol}|${timeframe}` -> { at, limit, bars }
-// Symbols whose last live fetch failed and were served mock data instead.
+// Symbols whose last live fetch failed (reported as `fallbacks`; NO mock data is served for them in live mode).
 const fallbacks = new Map();
 // symbol -> true when the latest live bar is stale (closed market / old data)
 const staleMap = new Map();
@@ -120,9 +139,9 @@ const staleMap = new Map();
 function remember(symbol, timeframe, limit, rawBars) {
   const { bars } = validateBars(rawBars);
   if (!bars.length) return null;
-  cache.set(`${symbol}|${timeframe}`, { at: Date.now(), limit, bars: bars.slice(-limit) });
+  setCapped(cache, `${symbol}|${timeframe}`, { at: Date.now(), limit, bars: bars.slice(-limit) }, MAX_CACHE);
   fallbacks.delete(symbol);
-  if (timeframe === '1Hour') staleMap.set(symbol, isStale(symbol, bars[bars.length - 1].t));
+  if (timeframe === '1Hour') setCapped(staleMap, symbol, isStale(symbol, bars[bars.length - 1].t), MAX_CACHE);
   return bars.slice(-limit);
 }
 
@@ -152,7 +171,12 @@ export const alpaca = {
     cache.clear();
   },
 
-  /** Warm the cache with a few multi-symbol requests instead of one request per symbol. Failures are silent (getBars falls back). */
+  /** Test hook: internal cache sizes. */
+  _sizes() {
+    return { cache: cache.size, stale: staleMap.size, fallbacks: fallbacks.size };
+  },
+
+  /** Warm the cache with a few multi-symbol requests instead of one request per symbol. Failures are logged only (getBars retries per symbol and throws MarketDataError). */
   async prefetch(symbols, { timeframe = '1Hour', limit = 120 } = {}) {
     if (this.usingMock()) return;
     const groups = [
@@ -183,10 +207,10 @@ export const alpaca = {
       if (!bars) throw new Error('no valid bars returned');
       return bars.slice(-limit);
     } catch (err) {
-      // Soft-fallback so the dashboard still works offline / without keys
-      console.warn(`[alpaca] bars failed for ${symbol}, using mock:`, err.message);
-      fallbacks.set(symbol, { error: err.message, at: new Date().toISOString() });
-      return mockBars(symbol, limit, timeframe);
+      // Live mode: never serve fake prices. Record the failure (surfaced as `fallbacks`) and let the caller skip.
+      console.warn(`[alpaca] bars failed for ${symbol}:`, err.message);
+      setCapped(fallbacks, symbol, { error: err.message, at: new Date().toISOString() }, MAX_CACHE);
+      throw err instanceof MarketDataError ? err : new MarketDataError(symbol, err.message);
     }
   },
 

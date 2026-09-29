@@ -64,6 +64,7 @@ const files = {
   equity: path.join(config.dataDir, 'equity.json'),
   pickScores: path.join(config.dataDir, 'pick-scores.json'),
   positionsArchive: path.join(config.dataDir, 'positions-archive.json'),
+  dayStart: path.join(config.dataDir, 'day-start.json'),
 };
 
 export const MAX_POSITIONS = 1000;
@@ -198,6 +199,14 @@ export const store = {
   },
   getPositionsArchive() {
     return readJson(files.positionsArchive, []);
+  },
+
+  /** Start-of-ET-day equity snapshot { day:'YYYY-MM-DD', equity } used for the daily loss halt. */
+  getDayStart() {
+    return cached('dayStart', files.dayStart, null);
+  },
+  setDayStart(data) {
+    put('dayStart', files.dayStart, data);
   },
 
   getWorker() {
