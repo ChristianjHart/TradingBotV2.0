@@ -143,3 +143,16 @@ test('boot restore retries with backoff before concluding there is no account; a
     tableRows.app_users = [];
   }
 });
+
+test('a missing app_users table (migration 003 not applied) does not block first-run signup', async () => {
+  const { usersRepo } = await import('../server/db/users.js');
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 'PGRST205', message: "Could not find the table 'public.app_users' in the schema cache" }), { status: 404, headers: { 'content-type': 'application/json' } });
+  try {
+    await usersRepo.restoreFromSupabase({ attempts: 1, baseDelayMs: 1 });
+    // state is only observable when Supabase is enabled in this process; when it is not, restoreState is already 'ok'
+    assert.equal(usersRepo.restoreState, 'ok');
+  } finally {
+    globalThis.fetch = real;
+  }
+});
