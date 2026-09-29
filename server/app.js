@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { requestLogger } from './services/http.js';
 import api from './routes/api.js';
-import { errorHandler } from './middleware.js';
+import { errorHandler, securityHeaders } from './middleware.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +14,7 @@ export function createApp() {
   const app = express();
   if (config.trustProxy) app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  app.use(securityHeaders);
   // Same-origin by default (no CORS headers); set CORS_ORIGIN to allow one external origin.
   if (config.corsOrigin) app.use(cors({ origin: config.corsOrigin }));
   app.use(express.json({ limit: '20kb' }));

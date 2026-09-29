@@ -25,30 +25,46 @@ export function recordPicks(runId, picks) {
   return recs.length;
 }
 
-/** Score every due pick against the price at its horizon (direction hit/miss). */
+/**
+ * Score every due pick against the price at its horizon (direction hit/miss).
+ * Bars are fetched on a snapshot (awaits); the results are then merged by id onto the LATEST store contents in one
+ * synchronous section, so picks recorded (recordPicks) while we were awaiting are never overwritten.
+ * A pick whose bars cannot be fetched (live data failure) is skipped and retried next time; the reason is logged once.
+ */
 export async function scorePicks() {
-  const all = store.getPickScores();
   const now = Date.now();
-  const due = all.filter((r) => !r.scored && new Date(r.dueAt).getTime() <= now);
+  const due = store.getPickScores().filter((r) => !r.scored && new Date(r.dueAt).getTime() <= now);
   if (!due.length) return { scored: 0, hits: 0 };
   const barsBy = new Map();
-  let scored = 0;
-  let hits = 0;
+  const failed = new Map(); // symbol -> reason
+  const results = new Map(); // id -> scored record
   for (const r of due) {
+    if (failed.has(r.symbol)) continue;
     try {
       if (!barsBy.has(r.symbol)) barsBy.set(r.symbol, await alpaca.getBars(r.symbol, { limit: 120 }));
       const px = priceAt(barsBy.get(r.symbol), new Date(r.dueAt).getTime());
-      const next = px == null ? { ...r, scored: true, hit: null, unscorable: true } : scorePick(r, px);
-      Object.assign(r, next);
-      upsert('pick_scores', { id: r.id, raw: r, updated_at: new Date().toISOString() });
-      scored += 1;
-      if (r.hit) hits += 1;
-    } catch {
-      /* retry next time */
+      results.set(r.id, px == null ? { ...r, scored: true, hit: null, unscorable: true } : scorePick(r, px));
+    } catch (err) {
+      failed.set(r.symbol, err.message);
     }
   }
+  if (failed.size) {
+    store.addLog({ level: 'warn', message: `pick scoring: skipped ${failed.size} symbol(s), market data unavailable: ${[...failed].map(([s, m]) => `${s} (${m})`).join('; ').slice(0, 500)}` });
+  }
+  if (!results.size) return { scored: 0, hits: 0 };
+  const latest = store.getPickScores(); // re-read after the awaits
+  let scored = 0;
+  let hits = 0;
+  const merged = latest.map((r) => {
+    const next = results.get(r.id);
+    if (!next || r.scored) return r; // already scored elsewhere: keep as is
+    scored += 1;
+    if (next.hit) hits += 1;
+    upsert('pick_scores', { id: next.id, raw: next, updated_at: new Date().toISOString() });
+    return next;
+  });
   if (scored) {
-    store.setPickScores(all);
+    store.setPickScores(merged);
     store.setWorker({ ...store.getWorker(), lastEvaluateAt: new Date().toISOString() });
     store.addLog({ level: 'info', message: `scored ${scored} scanner picks (${hits} direction hits)` });
   }

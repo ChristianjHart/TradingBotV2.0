@@ -7,8 +7,13 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: "22"
       - key: NODE_ENV
         value: production
+      # Render terminates TLS in front of the app: required so rate limiting keys on the real client IP.
+      - key: TRUST_PROXY
+        value: "true"
       - key: USE_MOCK_DATA
         value: "true"
       - key: SCAN_INTERVAL_MINUTES
@@ -17,9 +22,22 @@ services:
         value: "12"
       - key: PREDICTION_HORIZON_HOURS
         value: "24"
-      # Set these in the Render dashboard for live Alpaca data:
-      # ALPACA_API_KEY, ALPACA_API_SECRET, then set USE_MOCK_DATA=false
       - key: ALPACA_BASE_URL
         value: https://paper-api.alpaca.markets
       - key: ALPACA_DATA_URL
         value: https://data.alpaca.markets
+      # Secrets: set these in the Render dashboard (never commit values).
+      # ADMIN_TOKEN protects the credit-spending / mutating endpoints (/api/run, close, settings, worker). SET IT.
+      - key: ADMIN_TOKEN
+        sync: false
+      # Live Alpaca data: set both keys, then set USE_MOCK_DATA=false.
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

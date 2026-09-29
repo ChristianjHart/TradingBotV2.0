@@ -95,6 +95,29 @@ Select up to ${TOP_N} symbols with the most potential for a meaningful move over
 Rules: crypto cannot be shorted (long only); list each symbol at most once; keep the book balanced — no more than ~70% of picks in one direction unless the regime clearly justifies it; weigh the regime and relative strength (prefer longs with positive relative strength in risk-on, shorts with negative relative strength in risk-off).
 Reply with ONLY JSON: {"picks":[{"symbol":"...","direction":"long|short","confidence":0.0,"reason":"..."}]}. Use only symbols from the table.`;
 
+const MAX_RAW_PICKS = 500;
+const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Defensive parse of the scanner LLM's JSON: `picks` must be an array of plain objects with a known string symbol
+ * and long/short direction. Bad entries are dropped; a bad overall shape throws so the caller uses the rules fallback.
+ */
+export function sanitizePicks(json, known) {
+  if (!isPlain(json) || !Array.isArray(json.picks)) throw new Error('model returned an unusable JSON shape');
+  return json.picks
+    .slice(0, MAX_RAW_PICKS)
+    .filter((p) => isPlain(p) && typeof p.symbol === 'string' && known.has(p.symbol) && (p.direction === 'long' || p.direction === 'short'))
+    .map((p) => {
+      const c = typeof p.confidence === 'number' || typeof p.confidence === 'string' ? Number(p.confidence) : NaN;
+      return {
+        symbol: p.symbol,
+        direction: p.direction,
+        confidence: Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : 0,
+        reason: typeof p.reason === 'string' ? p.reason.slice(0, 300) : '',
+      };
+    });
+}
+
 export async function runScannerBot(data, { regime } = {}) {
   const known = new Map(data.map((d) => [d.symbol, d]));
   let picks;
@@ -110,14 +133,7 @@ export async function runScannerBot(data, { regime } = {}) {
         user: JSON.stringify({ regime: regime?.line || 'unknown', rows: data.map((d) => d.row) }),
         maxTokens: 16000,
       });
-      picks = (json.picks || [])
-        .filter((p) => known.has(p.symbol) && ['long', 'short'].includes(p.direction))
-        .map((p) => ({
-          symbol: p.symbol,
-          direction: p.direction,
-          confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0)),
-          reason: String(p.reason || '').slice(0, 300),
-        }));
+      picks = sanitizePicks(json, known);
       if (!picks.length) throw new Error('model returned no valid picks');
       source = 'ai';
       model = config.openrouter.scannerModel;

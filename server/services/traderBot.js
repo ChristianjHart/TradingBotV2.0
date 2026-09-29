@@ -166,13 +166,14 @@ export async function runTraderBot(picks, { regime } = {}) {
     }
     // The scanner's price can be minutes old: refetch, and refuse to open on stale/unavailable data.
     let q = null;
+    let qErr = null;
     try {
       q = await alpaca.getQuote(t.symbol);
-    } catch {
-      /* treated as unavailable */
+    } catch (err) {
+      qErr = err; // live data failure: candidate rejected, never priced from mock data
     }
     if (!q || !Number.isFinite(q.price) || q.stale) {
-      skipped.push(`${t.symbol} (stale quote${q && q.stale ? ': market closed or old data' : ': unavailable'})`);
+      skipped.push(`${t.symbol} (stale quote${q && q.stale ? ': market closed or old data' : qErr?.code === 'market_data_unavailable' ? ': market data unavailable' : ': unavailable'})`);
       continue;
     }
     const quoted = q.price;

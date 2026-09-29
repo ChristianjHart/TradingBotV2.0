@@ -29,11 +29,12 @@ Open [http://localhost:3000](http://localhost:3000).
    - **Build:** `npm install`
    - **Start:** `npm start`
    - **Health check:** `/api/health`
-4. Env vars (optional for a first mock-data test — defaults work):
+4. `render.yaml` already sets `NODE_VERSION=22`, `TRUST_PROXY=true` and declares the secrets (`ADMIN_TOKEN`, `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) as `sync: false`, so Render asks you for them. **Set `ADMIN_TOKEN`**: without it anyone who finds the URL can call `POST /api/run`, which spends your OpenRouter credits.
+5. Env vars (optional for a first mock-data test — defaults work):
    - `USE_MOCK_DATA=true` for a smoke test with no keys
    - Or set `ALPACA_API_KEY`, `ALPACA_API_SECRET`, and `USE_MOCK_DATA=false` for live scans
 
-Render sets `PORT` automatically. Note: free instances sleep when idle, and the local `data/` store is **ephemeral** (resets on redeploy / disk wipe) unless you add a persistent disk.
+Render sets `PORT` automatically. Set `TRUST_PROXY=true` on any reverse-proxied host (already in `render.yaml`). Note: free instances sleep when idle, and the local `data/` store is **ephemeral** (resets on redeploy / disk wipe) unless you add a persistent disk.
 
 ### Alpaca (optional but recommended)
 
@@ -48,6 +49,14 @@ USE_MOCK_DATA=false
 The app only uses Alpaca for **market data**. Order endpoints are never called.
 
 ## Security
+
+**Set `ADMIN_TOKEN` in production.** `POST /api/run` triggers OpenRouter calls that cost money; with no token it is open to anyone (only rate limited).
+
+Every response carries `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and a Content-Security-Policy (same-origin + `*.tradingview.com` scripts/frames + Google Fonts). Market endpoints (`/api/market/*`) only serve symbols in the scanner universe or with an open position (otherwise 400).
+
+Live data failures are never papered over with mock prices: with real Alpaca keys a failed fetch throws (HTTP 502 on the market routes), the symbol is skipped by the monitor / trader / pick scoring, and it is listed under `fallbacks` in `/api/health` and `/api/status`.
+
+Worker status: `POST /api/run` returns **409** (`code: worker_not_running`) while the worker is stopped or killed, and the trader never opens positions in that state. The 5-minute monitor keeps managing exits (stops, targets, time exit) regardless of worker status.
 
 Set `ADMIN_TOKEN` to require `Authorization: Bearer <token>` on mutating/costly endpoints (`POST /api/run`, `/positions/*/close`, `/positions/close-all`, `/worker/*`, `PATCH /settings`). Unset = open (local use). `GET /api/auth/status` reports `{required}`. CORS is same-origin unless `CORS_ORIGIN` is set; `POST /api/run` is rate limited; settings are whitelisted and range-checked.
 

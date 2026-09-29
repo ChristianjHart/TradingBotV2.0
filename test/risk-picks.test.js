@@ -1,3 +1,4 @@
+import './setup.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkEntry, dailyPnl, isHalted, limitsFrom } from '../server/services/risk.js';

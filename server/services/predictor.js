@@ -46,6 +46,29 @@ function confidenceFromScore(raw, components) {
   return clamp(0.45 + magnitude * 0.25 + agreement * 0.2, 0.4, 0.96);
 }
 
+/**
+ * Human-readable reasons that agree with the chosen direction. Bullish signals (momentum up, RSI oversold = bounce setup,
+ * MACD up, EMA trend up) are listed for longs, bearish ones (fading momentum, RSI overbought, MACD down, trend down) for shorts;
+ * signals pointing the other way are never listed as reasons. Neutral keeps a single 'mixed' note.
+ */
+export function reasonsFor(direction, features, components) {
+  if (direction === 'neutral') return ['mixed signals — low edge'];
+  const bull = [];
+  const bear = [];
+  if (components.momentum > 0.3) bull.push('strong short-term momentum');
+  if (components.momentum < -0.3) bear.push('fading momentum');
+  if (features.rsi < 35) bull.push('RSI oversold (bounce setup)');
+  if (features.rsi > 65) bear.push('RSI overbought (pullback setup)');
+  if (components.macdScore > 0.2) bull.push('MACD histogram expanding up');
+  if (components.macdScore < -0.2) bear.push('MACD histogram expanding down');
+  if (components.trend > 0.25) bull.push('EMA9 > EMA21 trend up');
+  if (components.trend < -0.25) bear.push('EMA9 < EMA21 trend down');
+  const reasons = direction === 'long' ? bull : bear;
+  if (features.volumeRatio > 1.4) reasons.push('elevated volume');
+  if (!reasons.length) reasons.push(`composite score favours ${direction}`);
+  return reasons;
+}
+
 export function predictFromBars(symbol, bars, { horizonHours } = {}) {
   const model = MODEL;
   const features = extractFeatures(bars);
@@ -56,17 +79,7 @@ export function predictFromBars(symbol, bars, { horizonHours } = {}) {
   const expectedMovePct = clamp(raw * 1.8 * (1 + features.volatility * 5), -8, 8);
   const targetPrice = features.price * (1 + expectedMovePct / 100);
 
-  const reasons = [];
-  if (components.momentum > 0.3) reasons.push('strong short-term momentum');
-  if (components.momentum < -0.3) reasons.push('fading momentum');
-  if (features.rsi < 35) reasons.push('RSI oversold');
-  if (features.rsi > 65) reasons.push('RSI overbought');
-  if (components.macdScore > 0.2) reasons.push('MACD histogram expanding up');
-  if (components.macdScore < -0.2) reasons.push('MACD histogram expanding down');
-  if (components.trend > 0.25) reasons.push('EMA9 > EMA21 trend up');
-  if (components.trend < -0.25) reasons.push('EMA9 < EMA21 trend down');
-  if (features.volumeRatio > 1.4) reasons.push('elevated volume');
-  if (!reasons.length) reasons.push('mixed signals — low edge');
+  const reasons = reasonsFor(direction, features, components);
 
   return {
     id: `pred_${Date.now()}_${symbol.replace('/', '')}_${Math.random().toString(36).slice(2, 6)}`,

@@ -8,7 +8,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test test/*.test.js",
-    "check": "find server scripts test -name '*.js' -o -name '*.mjs' | xargs -n1 node --check",
+    "check": "find server scripts test public/js -name '*.js' -o -name '*.mjs' | xargs -n1 node --check",
     "logs": "node scripts/pull-logs.mjs",
     "prune": "node scripts/prune-logs.mjs"
   },

@@ -95,8 +95,46 @@ export function validateSettings(body) {
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}(\/[A-Za-z]{2,5})?$/;
 export const validSymbol = (s) => SYMBOL_RE.test(s);
 
+/** Wrap an async route handler so a rejection is forwarded to the Express error middleware (never an unhandled rejection). */
+export const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve().then(() => fn(req, res, next)).catch(next);
+};
+
+/**
+ * Security headers for every response (API and static). CSP allows only same-origin plus TradingView
+ * (scripts/frames/connect on *.tradingview.com) and Google Fonts. Styles need 'unsafe-inline' (inline style=""
+ * attributes). script-src stays strict; script-src-attr 'unsafe-inline' exists only for the font stylesheet's
+ * `onload="this.media='all'"` attribute in index.html (inline <script> blocks are NOT allowed).
+ */
+export const CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://s3.tradingview.com https://*.tradingview.com",
+  "script-src-attr 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: https://*.tradingview.com",
+  "frame-src 'self' https://*.tradingview.com https://*.tradingview-widget.com",
+  "connect-src 'self' https://*.tradingview.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
+export function securityHeaders(_req, res, next) {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Content-Security-Policy': CSP,
+  });
+  next();
+}
+
 /** JSON error responses for body-parser failures and anything uncaught. */
 export function errorHandler(err, _req, res, _next) {
   const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error('[error]', err);
+  if (res.headersSent) return;
   res.status(status).json({ error: status === 413 ? 'request body too large' : status < 500 ? 'bad request' : 'internal error' });
 }

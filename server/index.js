@@ -10,6 +10,10 @@ import { guarded } from './services/jobs.js';
 import { warnIfProxyMisconfigured } from './middleware.js';
 import { hydrateFromSupabase } from './db/hydrate.js';
 import { supabaseEnabled } from './db/supabase.js';
+import { installProcessHandlers, installShutdownHandlers } from './lifecycle.js';
+
+installProcessHandlers();
+installShutdownHandlers();
 
 const app = createApp();
 

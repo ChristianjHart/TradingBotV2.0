@@ -8,7 +8,8 @@ import { listPositions, closeManually, closeAll } from '../services/positions.js
 import { computePerformance } from '../services/performance.js';
 import { pickStats } from '../services/picks.js';
 import { usMarketOpen } from '../services/market.js';
-import { requireAdmin, rateLimit, validateSettings, validSymbol } from '../middleware.js';
+import { requireAdmin, rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
+import { UNIVERSE } from '../services/universe.js';
 
 const router = Router();
 
@@ -23,6 +24,13 @@ const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run', refund
 function sendError(res, err, fallback = 500) {
   const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : fallback;
   res.status(status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+}
+/** Market endpoints only serve the scanner universe plus open-position symbols (bounded caches, no arbitrary upstream calls). */
+function marketSymbolError(symbol) {
+  if (typeof symbol !== 'string' || !validSymbol(symbol)) return 'invalid symbol';
+  if (UNIVERSE.includes(symbol)) return null;
+  if (store.getPositions().some((p) => p.status === 'open' && p.symbol === symbol)) return null;
+  return 'symbol not in the scanner universe or open positions';
 }
 const wantsForce = (req) => /^(1|true)$/i.test(String(req.query.force ?? req.body?.force ?? ''));
 
@@ -44,7 +52,12 @@ router.get('/health', (_req, res) => {
 
 router.get('/auth/status', (_req, res) => res.json({ required: Boolean(config.adminToken) }));
 
+// A stopped/killed worker must not spend credits or open positions: 409 (exits stay managed by the monitor).
 router.post('/run', requireAdmin, runLimit, (_req, res) => {
+  const ws = store.getWorker().status;
+  if (ws === 'stopped' || ws === 'killed') {
+    return res.status(409).json({ error: `worker is ${ws}: start the worker before running the AI desk`, code: 'worker_not_running', workerStatus: ws });
+  }
   const started = startAiRun();
   res.status(started ? 202 : 200).json({ started, ...runState });
 });
@@ -71,16 +84,12 @@ router.get('/performance', (_req, res) => {
   );
 });
 
-router.get('/positions', async (_req, res) => {
-  try {
-    res.json(await listPositions());
-  } catch (err) {
-    sendError(res, err);
-  }
-});
+router.get('/positions', asyncHandler(async (_req, res) => {
+  res.json(await listPositions());
+}));
 
 // Body/query `force` closes at the last (stale) price. Errors: 409 stale quote, 502 no quote (nothing closed).
-router.post('/positions/close-all', requireAdmin, async (req, res) => {
+router.post('/positions/close-all', requireAdmin, asyncHandler(async (req, res) => {
   try {
     const r = await closeAll({ force: wantsForce(req) });
     if (r.failed.length && !r.closed) {
@@ -91,15 +100,15 @@ router.post('/positions/close-all', requireAdmin, async (req, res) => {
   } catch (err) {
     sendError(res, err);
   }
-});
+}));
 
-router.post('/positions/:id/close', requireAdmin, async (req, res) => {
+router.post('/positions/:id/close', requireAdmin, asyncHandler(async (req, res) => {
   try {
     res.json(await closeManually(req.params.id, { force: wantsForce(req) }));
   } catch (err) {
     sendError(res, err);
   }
-});
+}));
 
 router.get('/status', (_req, res) => {
   const worker = store.getWorker();
@@ -128,39 +137,42 @@ router.get('/logs', (req, res) => {
   res.json({ logs: store.getLogs().slice(0, limit) });
 });
 
-router.get('/market/quote/:symbol', async (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
-  if (!validSymbol(symbol)) return res.status(400).json({ error: 'invalid symbol' });
+router.get('/market/quote/:symbol', asyncHandler(async (req, res) => {
+  const symbol = req.params.symbol; // Express already decodes params once (a malformed escape is a 400 from the router)
+  const bad = marketSymbolError(symbol);
+  if (bad) return res.status(400).json({ error: bad });
   try {
     res.json(await alpaca.getQuote(symbol));
   } catch (err) {
     sendError(res, err, 502);
   }
-});
+}));
 
-router.get('/market/bars/:symbol', async (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
-  if (!validSymbol(symbol)) return res.status(400).json({ error: 'invalid symbol' });
+router.get('/market/bars/:symbol', asyncHandler(async (req, res) => {
+  const symbol = req.params.symbol;
+  const bad = marketSymbolError(symbol);
+  if (bad) return res.status(400).json({ error: bad });
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
     res.json({ symbol, bars: await alpaca.getBars(symbol, { limit }) });
   } catch (err) {
     sendError(res, err, 502);
   }
-});
+}));
 
-router.get('/market/quotes', async (req, res) => {
+router.get('/market/quotes', asyncHandler(async (req, res) => {
   const symbols = String(req.query.symbols || 'SPY,QQQ,IWM')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  if (symbols.length > 30 || !symbols.every(validSymbol)) return res.status(400).json({ error: 'invalid symbols' });
+  const bad = symbols.map(marketSymbolError).find(Boolean);
+  if (symbols.length > 30 || bad) return res.status(400).json({ error: bad || 'too many symbols' });
   try {
     res.json({ quotes: await alpaca.getQuotes(symbols) });
   } catch (err) {
     sendError(res, err, 502);
   }
-});
+}));
 
 router.get('/settings', (_req, res) => {
   res.json({ ...store.getSettings(), tradingEnabled: false });
