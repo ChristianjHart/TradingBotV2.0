@@ -15,7 +15,7 @@ export const STOCKS = [
 export const CRYPTO = [
   'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD',
   'DOT/USD', 'LTC/USD', 'UNI/USD', 'AAVE/USD', 'XRP/USD', 'BCH/USD',
-  'SHIB/USD', 'ETC/USD', 'CRV/USD', 'GRT/USD', 'BAT/USD', 'SUSHI/USD',
+  'SHIB/USD', 'CRV/USD', 'GRT/USD', 'BAT/USD', 'SUSHI/USD',
   'YFI/USD', 'XTZ/USD',
 ];
 
