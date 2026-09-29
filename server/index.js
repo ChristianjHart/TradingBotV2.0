@@ -62,8 +62,9 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
-app.listen(config.port, () => {
-  console.log(`TradingBot V2.0 (predict-only) → http://localhost:${config.port}`);
+const host = process.env.HOST || '0.0.0.0';
+app.listen(config.port, host, () => {
+  console.log(`TradingBot V2.0 (predict-only) → http://${host}:${config.port}`);
   console.log(`Data mode: ${alpaca.usingMock() ? 'MOCK' : 'ALPACA'}`);
   bootScan();
 });

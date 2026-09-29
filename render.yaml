@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: tradingbot-v2
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: USE_MOCK_DATA
+        value: "true"
+      - key: SCAN_INTERVAL_MINUTES
+        value: "30"
+      - key: WATCHLIST_SIZE
+        value: "12"
+      - key: PREDICTION_HORIZON_HOURS
+        value: "24"
+      # Set these in the Render dashboard for live Alpaca data:
+      # ALPACA_API_KEY, ALPACA_API_SECRET, then set USE_MOCK_DATA=false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPACA_DATA_URL
+        value: https://data.alpaca.markets
