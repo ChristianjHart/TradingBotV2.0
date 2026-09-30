@@ -1079,7 +1079,7 @@ async function main() {
     });
 
     await step(vp, 'schedule-settings', async () => {
-      const p2 = await newPage(ctx, vp);
+      const p2 = await newPage(ctx, vp, { expectErrors: true });
       await applySafeArea(ctx, p2, vp);
       const plans = ['A', 'B', 'C', 'D'].map((pl, i) => ({ plan: pl, label: `Plan ${pl}`, runsPerMonth: 21 * (i + 1), eventRunsAssumed: pl === 'C' ? 4 : 0, estCostPerRunUsd: i === 1 ? null : 0.4, basis: i === 1 ? 'unknown' : 'estimated', projectedMonthlyUsd: i === 1 ? null : 8.4 * (i + 1) * 1.6, pctOfBudget: i === 1 ? null : 42 * (i + 1) * 1.6, fitsBudget: i === 1 ? null : i < 2, note: 'Estimate from model prices and default token sizes. ' + 'x'.repeat(150) }));
       const slots = [{ id: 's1', timeEt: '09:00', timeUtc: '13:00', scope: 'stocks', status: 'fired' }, { id: 's2', timeEt: '12:30', timeUtc: '16:30', scope: 'all', status: 'skipped', reason: 'budget_warn_event_dropped' }, { id: 's3', timeEt: '16:15', timeUtc: '20:15', scope: 'crypto', status: 'missed', reason: 'older_than_grace' }, { id: 's4', timeEt: '21:00', timeUtc: '01:00', scope: 'crypto', status: 'upcoming' }];
