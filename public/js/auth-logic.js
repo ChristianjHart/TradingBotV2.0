@@ -69,7 +69,7 @@ export function formatLast4(v) {
 }
 
 const CONSEQUENCE = {
-  openrouter: 'OpenRouter not set → rule-based bots (no AI).',
+  openrouter: 'OpenRouter key not set: the AI can’t run, so RUN is disabled until you add one.',
   alpaca: 'Alpaca not set → mock data (synthetic prices).',
 };
 

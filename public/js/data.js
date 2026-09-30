@@ -10,15 +10,17 @@ export function refresh() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const [status, dashboard, picks, positions, summary, perf] = await Promise.all([
+      const [status, dashboard, picks, positions, summary, perf, proposals, budget] = await Promise.all([
         api('/status'),
         apiOptional('/dashboard'),
         apiOptional('/ai/picks'),
         apiOptional('/positions'),
         apiOptional('/ai/summary'),
         apiOptional('/performance'),
+        apiOptional('/proposals?status=pending&limit=50'),
+        apiOptional('/budget'),
       ]);
-      Object.assign(state, { status, dashboard, picks, positions, summary, perf, loaded: true, loadError: null, lastUpdate: new Date() });
+      Object.assign(state, { status, dashboard, picks, positions, summary, perf, proposals: proposals ?? state.proposals, budget: budget ?? state.budget, loaded: true, loadError: null, lastUpdate: new Date() });
       if (status.run) {
         state.run = { ...(state.run || {}), ...status.run };
         if (status.run.running && !runTracking) {

@@ -2,6 +2,7 @@ import { api, apiOptional, escapeHtml as esc, fmtDuration } from './api.js';
 import { refresh } from './data.js';
 import { hooks, $, nowMs, setHtml, setText, state } from './state.js';
 import { STEPS, stepperState } from './run-logic.js';
+import { aiBlocked, runDoneText, runProblem } from './ai-logic.js';
 import { toast } from './ui.js';
 
 export { STEPS };
@@ -14,10 +15,29 @@ export function isRunning() {
   return !!state.run?.running;
 }
 
+const actionHtml = (a) => (a.href ? `<a class="btn-accent rp-btn" href="${esc(a.href)}">${esc(a.label)}</a>` : `<button type="button" class="btn-accent rp-btn" data-act="${esc(a.id)}">${esc(a.label)}</button>`);
+
+function problemHtml(pr) {
+  return `<div class="run-problem run-problem-${pr.tone}" role="alert">
+    <div class="rp-h"><span class="rp-ic" aria-hidden="true">${pr.tone === 'blocked' ? '⏸' : '!'}</span><strong>${esc(pr.title)}</strong><button type="button" class="pc-msg-x" data-act="dismiss-run" aria-label="Dismiss this message"><span aria-hidden="true">×</span></button></div>
+    <p>${esc(pr.message)}</p>
+    ${pr.detail ? `<p class="rp-detail dim">Details: ${esc(pr.detail.slice(0, 280))}</p>` : ''}
+    <p class="rp-safe">Nothing was changed: your proposals and positions are untouched.</p>
+    <div class="rp-actions">${pr.actions.map((a) => actionHtml(a)).join('')}</div></div>`;
+}
+
+export function runProblemNow() {
+  const r = state.run;
+  const pr = runProblem(r);
+  if (!pr) return null;
+  return state.runDismissed === `${r.runId}:${r.stage}` ? null : pr;
+}
+
 export function runBarHtml() {
   const r = state.run;
   const v = stepperState(r, nowMs(), state.runLastStage);
-  if (!v.visible) return '';
+  const pr = runProblemNow();
+  if (!v.visible && !pr) return '';
   const steps = v.steps.map((s, i) => {
     const st = s.state;
     const icon = { done: '✓', error: '!', active: '', pending: String(i + 1) }[st];
@@ -26,27 +46,40 @@ export function runBarHtml() {
       <span class="step-dot" aria-hidden="true">${st === 'active' ? '<span class="spin"></span>' : icon}</span>
       <span class="step-txt"><strong>${s.label}</strong><small>${st === 'active' ? esc(s.hint) : ''}<span class="sr-only"> ${sr}</span></small></span></li>`;
   }).join('');
+  if (v.kind === 'blocked' || (!v.visible && pr)) return pr ? problemHtml(pr) : '';
+  const n = Number(r.proposals) || 0;
   const tail =
     v.kind === 'error'
-      ? `<span class="neg">Run failed: ${esc(r.error || 'unknown error')}</span>`
+      ? '<span class="neg">Run failed. Nothing was proposed.</span>'
       : v.kind === 'done'
-        ? `<span class="pos">Done — ${r.picks ?? 0} picks, ${r.opened ?? 0} position(s) opened</span>`
+        ? `<span class="pos">${esc(runDoneText(r))}</span>${n ? ` <a class="linklike" href="#dashboard" data-jump="sec-proposals">Review ${n === 1 ? 'it' : 'them'}</a>` : ''}`
         : state.runLocal === false
-          ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded) — RUN is disabled until it finishes.</span>'
+          ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded). RUN is disabled until it finishes.</span>'
           : '<span class="dim">Running…</span>';
   return `<div class="run-bar" role="group" aria-label="Run progress"><ol class="stepper">${steps}</ol>
-    <div class="run-meta">${tail} <span class="mono dim" id="run-elapsed"></span></div></div>`;
+    <div class="run-meta">${tail} <span class="mono dim" id="run-elapsed"></span></div></div>${pr ? problemHtml(pr) : ''}`;
+}
+
+export function gateHtml() {
+  const g = aiBlocked(state.status?.ai);
+  if (!g || isRunning()) return '';
+  return `<div class="run-gate" id="run-gate-box"><strong>${esc(g.reason)}</strong><p>${esc(g.message)}</p><div class="rp-actions">${g.actions.map((a) => actionHtml(a)).join('')}</div></div>`;
 }
 
 export function patchRunBar() {
   setHtml($('run-bar'), runBarHtml());
+  setHtml($('run-gate'), gateHtml());
   tickRun();
   const b = $('btn-scan');
   if (b) {
-    b.disabled = isRunning();
+    const gate = aiBlocked(state.status?.ai);
+    b.disabled = isRunning() || !!gate;
     b.setAttribute('aria-busy', isRunning() ? 'true' : 'false');
+    if (gate) b.setAttribute('aria-describedby', 'run-gate');
+    else b.removeAttribute('aria-describedby');
     setText(b, isRunning() ? (state.runLocal === false ? 'RUN IN PROGRESS…' : 'RUNNING…') : 'RUN');
-    if (isRunning()) b.title = 'A run is already in progress — it can’t be cancelled, please wait for it to finish.';
+    if (isRunning()) b.title = 'A run is already in progress. It can’t be cancelled, please wait for it to finish.';
+    else if (gate) b.title = gate.reason;
     else b.removeAttribute('title');
   }
 }
@@ -67,8 +100,11 @@ export async function startRun() {
     patchRunBar();
     trackRun();
   } catch (e) {
-    if (e.status === 409) toast('Worker is stopped — press START', 'error');
-    else toast(`Could not start run: ${e.message}`, 'error');
+    if (e.code === 'worker_not_running' || (e.status === 409 && !e.code)) toast('The worker is stopped, so the AI can’t run. Press START in the header menu, then RUN again.', 'error', 9000);
+    else if (e.code && runProblem({ stage: 'blocked', code: e.code, error: e.message }) && e.code !== 'run_failed') {
+      state.run = { ...(state.run || {}), running: false, stage: 'blocked', code: e.code, error: e.message, runId: `local-${Date.now()}` };
+      patchRunBar();
+    } else toast(`Could not start run: ${e.message}`, 'error');
   }
 }
 
@@ -91,8 +127,9 @@ export async function trackRun() {
       if (!st.running) {
         await refresh().catch(() => {});
         hooks.patchCurrent();
-        if (st.error || st.stage === 'error') toast(`Run failed: ${st.error || 'unknown error'}`, 'error');
-        else if (st.stage === 'done') toast(`Run complete — ${st.picks ?? 0} picks, ${st.opened ?? 0} position(s) opened`, 'success');
+        const pr = runProblem(st);
+        if (pr) toast(`${pr.title}. ${pr.message}`, 'error', 9000);
+        else if (st.stage === 'done') toast(runDoneText(st), 'success', 7000, st.proposals ? { label: 'Review', href: '#dashboard', jump: 'sec-proposals' } : null);
         break;
       }
       await new Promise((r) => setTimeout(r, 2000));
@@ -118,5 +155,18 @@ export async function hydrateRun() {
     trackRun();
   } else {
     patchRunBar();
+  }
+}
+
+/** Delegated clicks inside the run bar / gate: retry and dismiss. (Links and data-jump anchors navigate on their own.) */
+export function onRunClick(e) {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  if (b.dataset.act === 'retry') startRun();
+  else if (b.dataset.act === 'dismiss-run') {
+    const r = state.run;
+    state.runDismissed = `${r?.runId}:${r?.stage}`;
+    patchRunBar();
+    $('btn-scan')?.focus({ preventScroll: true });
   }
 }

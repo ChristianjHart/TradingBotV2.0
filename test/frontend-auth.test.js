@@ -63,7 +63,7 @@ test('keyStatus derives label, tone and consequence', () => {
   const none = keyStatus('alpaca', { set: false, source: 'none' });
   assert.equal(none.label, 'Not set');
   assert.match(none.consequence, /mock data/);
-  assert.match(keyStatus('openrouter', undefined).consequence, /rule-based/);
+  assert.match(keyStatus('openrouter', undefined).consequence, /AI can.t run/);
   assert.equal(keyStatus('alpaca', { set: false, source: 'account', keyLast4: 'abcd', secretSet: false }).tone, 'warn');
 });
 

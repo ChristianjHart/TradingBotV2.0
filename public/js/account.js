@@ -1,5 +1,5 @@
 import { api, escapeHtml as esc } from './api.js';
-import { authErrorMessage, buildKeyPayload, keyStatus, validateModel, validatePasswordChange } from './auth-logic.js';
+import { authErrorMessage, buildKeyPayload, keyStatus, validatePasswordChange } from './auth-logic.js';
 import { forceLock } from './auth.js';
 import { refresh } from './data.js';
 import { hooks, state } from './state.js';
@@ -50,8 +50,7 @@ function render() {
   const a = state.account;
   const created = a.createdAt ? new Date(a.createdAt) : null;
   const since = created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
-  const d = a.models?.defaults || {};
-  host.innerHTML = `
+    host.innerHTML = `
   <section class="widget acct-card" aria-labelledby="h-acct"><h2 class="widget-title" id="h-acct">ACCOUNT</h2>
     <dl class="kv"><dt>Email</dt><dd class="acct-mail">${esc(a.email || state.auth.user?.email || '—')}</dd><dt>Member since</dt><dd>${esc(since)}</dd></dl>
     <form class="settings-form pw-form" id="f-pw" novalidate aria-labelledby="h-pw">
@@ -69,14 +68,6 @@ function render() {
     <p class="dim keys-note">Keys are encrypted on the server and attached to your account. They are never sent back to the browser — only the last 4 characters are shown. Fields are always empty; paste a new value to replace a key.</p>
     ${keyGroup('openrouter', a)}
     ${keyGroup('alpaca', a)}
-  </section>
-  <section class="widget models-card" aria-labelledby="h-models"><h2 class="widget-title" id="h-models">MODELS</h2>
-    <form class="settings-form" id="f-models" novalidate>
-      <label for="m-scan">Scanner model<input id="m-scan" name="scanner" type="text" inputmode="text" enterkeyhint="next" autocorrect="off" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.scanner ?? d.scanner ?? '')}" placeholder="${esc(d.scanner || 'vendor/model')}" aria-describedby="m-scan-h m-scan-e" /><span class="fld-hint" id="m-scan-h">Default: <code>${esc(d.scanner || '—')}</code></span><span class="fld-err" id="m-scan-e"></span></label>
-      <label for="m-trad">Trader model<input id="m-trad" name="trader" type="text" inputmode="text" enterkeyhint="go" autocorrect="off" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.trader ?? d.trader ?? '')}" placeholder="${esc(d.trader || 'vendor/model')}" aria-describedby="m-trad-h m-trad-e" /><span class="fld-hint" id="m-trad-h">Default: <code>${esc(d.trader || '—')}</code></span><span class="fld-err" id="m-trad-e"></span></label>
-      <div class="form-err" role="alert" data-err></div>
-      <div class="row-actions"><button class="btn-accent" type="submit">Save models</button><button class="btn-ghost" type="button" id="btn-models-reset" ${d.scanner || d.trader ? '' : 'disabled'}>Reset to defaults</button></div>
-    </form>
   </section>`;
   wire();
 }
@@ -195,7 +186,7 @@ function wire() {
     });
     form.querySelector('[data-act=remove]').addEventListener('click', async (e) => {
       const name = kind === 'openrouter' ? 'OpenRouter' : 'Alpaca';
-      const ok = await confirmDialog({ title: `Remove ${name} key${kind === 'alpaca' ? 's' : ''}?`, message: kind === 'openrouter' ? 'The bots will fall back to rule-based decisions (no AI) until you add a key again.' : 'The dashboard will fall back to synthetic mock data until you add keys again.', confirmText: 'Remove', danger: true });
+      const ok = await confirmDialog({ title: `Remove ${name} key${kind === 'alpaca' ? 's' : ''}?`, message: kind === 'openrouter' ? 'The AI scanner and trader will stop working (runs are blocked) until you add a key again.' : 'The dashboard will fall back to synthetic mock data until you add keys again.', confirmText: 'Remove', danger: true });
       if (!ok) return;
       setErr(form, '');
       pending(e.target.closest('button'), 'Removing…', async () => {
@@ -210,46 +201,9 @@ function wire() {
       });
     });
   });
-
-  const mf = host.querySelector('#f-models');
-  const saveModels = (scanner, trader) =>
-    pending(mf.querySelector('button[type=submit]'), 'Saving…', async () => {
-      try {
-        const r = await api('/account/models', { method: 'PUT', body: JSON.stringify({ scannerModel: scanner, traderModel: trader }) });
-        state.account = { ...state.account, models: { ...(state.account.models || {}), ...(r?.models || { scanner, trader }) } };
-        mf.querySelector('#m-scan').value = state.account.models.scanner ?? scanner;
-        mf.querySelector('#m-trad').value = state.account.models.trader ?? trader;
-        toast('Models saved', 'success');
-      } catch (err) {
-        setErr(mf, errOf(err, 'generic'));
-      }
-    });
-  mf.addEventListener('submit', (e) => {
-    e.preventDefault();
-    setErr(mf, '');
-    const s = mf.querySelector('#m-scan');
-    const t = mf.querySelector('#m-trad');
-    const es = validateModel(s.value);
-    const et = validateModel(t.value);
-    mf.querySelector('#m-scan-e').textContent = es || '';
-    mf.querySelector('#m-trad-e').textContent = et || '';
-    s.toggleAttribute('aria-invalid', !!es);
-    t.toggleAttribute('aria-invalid', !!et);
-    if (es) return s.focus();
-    if (et) return t.focus();
-    saveModels(s.value.trim(), t.value.trim());
-  });
-  mf.querySelector('#btn-models-reset').addEventListener('click', () => {
-    const d = state.account.models?.defaults || {};
-    mf.querySelector('#m-scan').value = d.scanner || '';
-    mf.querySelector('#m-trad').value = d.trader || '';
-    mf.querySelector('#m-scan-e').textContent = '';
-    mf.querySelector('#m-trad-e').textContent = '';
-    mf.requestSubmit();
-  });
 }
 
-/** Mount the account/keys/models cards into `el`. Degrades to a short note on servers without the account API. */
+/** Mount the account/keys cards into `el`. Degrades to a short note on servers without the account API. */
 export async function mountAccount(el) {
   host = el;
   host.innerHTML = '<section class="widget" aria-busy="true"><h2 class="widget-title">ACCOUNT</h2><div class="skel-wrap" aria-hidden="true"><div class="skeleton"></div><div class="skeleton"></div></div></section>';

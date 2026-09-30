@@ -18,11 +18,12 @@ export function stepperState(run, now, lastRunningStage = null) {
   const steps = STEPS.map((s, i) => {
     let st = 'pending';
     if (run.stage === 'done') st = 'done';
+    else if (run.stage === 'blocked') st = 'pending'; // blocked before anything ran
     else if (run.stage === 'error') st = i < errIdx ? 'done' : i === errIdx ? 'error' : 'pending';
     else if (idx >= 0) st = i < idx ? 'done' : i === idx ? 'active' : 'pending';
     return { ...s, state: st };
   });
-  const kind = run.stage === 'error' ? 'error' : run.stage === 'done' ? 'done' : 'running';
+  const kind = run.stage === 'error' ? 'error' : run.stage === 'blocked' ? 'blocked' : run.stage === 'done' ? 'done' : 'running';
   const start = new Date(run.startedAt).getTime();
   const end = run.running ? now : new Date(run.finishedAt || now).getTime();
   const elapsedMs = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : null;
