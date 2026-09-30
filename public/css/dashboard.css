@@ -1638,6 +1638,7 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
 .pc-risk-l > div { display: flex; justify-content: space-between; gap: 10px; }
 .pc-risk-l dt { color: var(--text-muted); }
 .pc-risk-l dd { text-align: right; }
+.pc-risk, .pc-notes, .pc-risk-l { min-width: 0; overflow-wrap: anywhere; }
 .pc-notes { margin: 0; padding-left: 18px; font-size: 13px; color: var(--amber-text); }
 .pc-src { font-size: 12px; overflow-wrap: anywhere; }
 .pc-msgs:empty { display: none; }
