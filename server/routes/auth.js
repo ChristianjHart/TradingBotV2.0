@@ -79,6 +79,7 @@ authRouter.post('/signup', asyncHandler(async (req, res) => {
   if (wait) return tooMany(res, wait);
   const { email: rawEmail, password, code } = req.body || {};
   if (s.needsCode && !codeMatches(code)) {
+    console.warn(`[setup] sign-up rejected: the setup code did not match (${typeof code === 'string' ? code.trim().length : 0} characters entered)`);
     signupByIp.fail(ip);
     signupGlobal.fail('all');
     return res.status(403).json({ error: 'invalid sign-up code', code: 'invalid_signup_code' });

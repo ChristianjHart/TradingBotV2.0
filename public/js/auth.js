@@ -188,7 +188,7 @@ function signupHtml() {
     ${field({ id: 'su-pw', label: 'Password', type: 'password', auto: 'new-password', extra: 'required minlength="10"', pw: true, hint: 'At least 10 characters. A long passphrase is best.' })}
     <div class="strength" id="su-strength" aria-live="polite"><div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div><span id="su-strength-txt">Use at least 10 characters.</span></div>
     ${field({ id: 'su-pw2', label: 'Confirm password', type: 'password', auto: 'new-password', extra: 'required', pw: true })}
-    ${a.signupNeedsCode ? field({ id: 'su-code', label: 'Setup code', type: 'password', auto: 'off', extra: 'required', hint: 'Your <code>SIGNUP_CODE</code>, or — if you never set one — the one-time code the server prints in its log at startup (Render → Logs, look for <code>[setup] One-time setup code</code>).' }) : ''}
+    ${a.signupNeedsCode ? field({ id: 'su-code', label: 'Setup code', type: 'text', auto: 'off', extra: 'required', hint: 'Your <code>SIGNUP_CODE</code>, or — if you never set one — the one-time code the server prints in its log at startup (Render → Logs, look for <code>[setup] One-time setup code</code>). Case and dashes do not matter.' }) : ''}
     <button class="auth-submit" type="submit"><span class="spin" aria-hidden="true" hidden></span><span class="lbl">Create account</span></button>
   </form>`;
 }
