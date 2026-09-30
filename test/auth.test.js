@@ -14,7 +14,7 @@ const { applyOwnerCredentials } = await import('../server/auth/accounts.js');
 const AR = await import('../server/routes/auth.js');
 const { loginByIp, loginByPair, loginEmailDelay, signupByIp, signupGlobal, passwordBySession, resetAuthLimiters } = AR;
 const C = await import('../server/auth/crypto.js');
-const { isLoopback, signupState, signupCode } = await import('../server/auth/policy.js');
+const { isLoopback, signupState, signupCode, codeMatches } = await import('../server/auth/policy.js');
 const { AttemptLimiter } = await import('../server/auth/index.js');
 
 const realFetch = globalThis.fetch;
@@ -569,4 +569,29 @@ test('security env vars tolerate case and stray whitespace (dashboard paste mist
     if (before.SIGNUP_CODE === undefined) delete process.env.SIGNUP_CODE;
     else process.env.SIGNUP_CODE = before.SIGNUP_CODE;
   }
+});
+
+test('one-time setup code: easy to type (case/dash/prefix tolerant), no look-alike characters, wrong or short codes rejected', () => {
+  const code = signupCode(); // no account, nothing configured -> the boot code
+  assert.match(code, /^[A-HJKMNP-Z2-9]{4}(-[A-HJKMNP-Z2-9]{4}){3}$/); // XXXX-XXXX-XXXX-XXXX, no 0/O/1/I/L
+  const bare = code.replace(/-/g, '');
+  assert.equal(codeMatches(code), true);
+  assert.equal(codeMatches(code.toLowerCase()), true);
+  assert.equal(codeMatches(bare), true);
+  assert.equal(codeMatches(`  ${bare.toLowerCase()} \n`), true);
+  assert.equal(codeMatches(`[setup] One-time setup code: ${code}`), true); // whole log line pasted
+  assert.equal(codeMatches(code.slice(0, -1)), false); // one character short
+  assert.equal(codeMatches(`${bare.slice(0, -1)}${bare.endsWith('A') ? 'B' : 'A'}`), false); // one character wrong
+  assert.equal(codeMatches(''), false);
+  assert.equal(codeMatches(undefined), false);
+  assert.equal(codeMatches(['x']), false);
+  assert.equal(signupCode(), code); // stable: same code on every call (and persisted on disk across restarts)
+});
+
+test('a configured SIGNUP_CODE stays exact (only surrounding whitespace is forgiven) and the boot code is then ignored', () => {
+  process.env.SIGNUP_CODE = 'Exact-Case-Code-1';
+  assert.equal(codeMatches('Exact-Case-Code-1'), true);
+  assert.equal(codeMatches('  Exact-Case-Code-1\n'), true);
+  assert.equal(codeMatches('exact-case-code-1'), false);
+  delete process.env.SIGNUP_CODE;
 });

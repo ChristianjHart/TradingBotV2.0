@@ -1,5 +1,7 @@
 // Who may sign up, and the auth gate's view of the world.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
 import { usersRepo } from '../db/users.js';
 import { safeEqual } from './crypto.js';
@@ -25,23 +27,59 @@ export function setupGuidance() {
 }
 
 /**
- * One-time setup code, random per process start. Used ONLY while no account exists and neither SIGNUP_CODE nor ADMIN_TOKEN
- * is configured: it is printed to the server's own log (never stored, never served over HTTP), so only someone who can read
- * the host's logs — the operator — can claim the owner account. It changes on every restart and dies once an account exists.
+ * One-time setup code. Used ONLY while no account exists and neither SIGNUP_CODE nor ADMIN_TOKEN is configured. It is printed
+ * to the server's own log (never served over HTTP, never sent to /api/logs or Supabase), so only someone who can read the
+ * host's logs — the operator — can claim the owner account.
+ *
+ * It is PERSISTED in the data dir so a sleep/wake or redeploy-on-the-same-disk keeps the same code (a code that changed on
+ * every restart was impossible to use on Render's free tier). It dies the moment an account exists. The alphabet has no
+ * look-alike characters (no 0/O, 1/I/L) and is compared case- and dash-insensitively.
  */
-const bootSetupCode = crypto.randomBytes(12).toString('base64url');
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const codeFile = () => path.join(config.dataDir, 'setup-code.json');
+let bootCodeCache = '';
+
+function makeBootCode() {
+  const bytes = crypto.randomBytes(16);
+  const chars = Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+  return chars.match(/.{4}/g).join('-'); // XXXX-XXXX-XXXX-XXXX (16 chars, ~79 bits)
+}
+
+const normalizeCode = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+function bootCode() {
+  if (bootCodeCache) return bootCodeCache;
+  try {
+    const saved = JSON.parse(fs.readFileSync(codeFile(), 'utf8'));
+    if (typeof saved?.code === 'string' && normalizeCode(saved.code).length >= 16) return (bootCodeCache = saved.code);
+  } catch {
+    /* none yet */
+  }
+  bootCodeCache = makeBootCode();
+  try {
+    fs.mkdirSync(config.dataDir, { recursive: true });
+    fs.writeFileSync(codeFile(), JSON.stringify({ code: bootCodeCache, createdAt: new Date().toISOString() }), { mode: 0o600 });
+  } catch (err) {
+    console.warn(`[setup] could not persist the setup code (${err.message}); it will change on restart`);
+  }
+  return bootCodeCache;
+}
 
 /** Operator-configured secret: SIGNUP_CODE, else ADMIN_TOKEN. */
 export const configuredCode = () => config.signupCode || config.adminToken || '';
 
 /** Secret that must accompany signup: the configured one, else (first run only) the one-time boot code. */
-export const signupCode = () => configuredCode() || (!accountExists() ? bootSetupCode : '');
+export const signupCode = () => configuredCode() || (!accountExists() ? bootCode() : '');
 
 /** Print the one-time code (console only — deliberately NOT via store.addLog, which is served by /api/logs and mirrored to Supabase). */
 export function announceSetupCode() {
   if (accountExists() || configuredCode() || usersRepo.restoreState !== 'ok') return false;
   const bar = '='.repeat(64);
-  console.log(`\n${bar}\n[setup] No owner account exists yet and SIGNUP_CODE is not set.\n[setup] One-time setup code: ${bootSetupCode}\n[setup] Enter it on the site's "Create owner account" screen. It changes on every restart and stops working once an account exists.\n${bar}\n`);
+  console.log(
+    `\n${bar}\n[setup] No owner account exists yet and SIGNUP_CODE is not set.\n[setup] One-time setup code: ${bootCode()}\n` +
+      `[setup] Enter it on the site's "Create owner account" screen (case and dashes do not matter).\n` +
+      `[setup] It stays the same across restarts until an account is created, then stops working.\n${bar}\n`,
+  );
   return true;
 }
 
@@ -69,4 +107,15 @@ export function signupState(req) {
   return { policyOpen, needsCode, open: policyOpen && (needsCode || !req || isLoopback(req)) };
 }
 
-export const codeMatches = (given) => Boolean(signupCode()) && typeof given === 'string' && safeEqual(given, signupCode());
+export function codeMatches(given) {
+  if (typeof given !== 'string') return false;
+  const configured = configuredCode();
+  if (configured) return safeEqual(given.trim(), configured);
+  if (accountExists()) return false;
+  // One-time boot code: tolerate case, dashes/spaces, and a pasted prefix ("[setup] One-time setup code: XXXX-...") — the
+  // input still has to END with the full code, so this makes typing easier without making guessing any easier.
+  const want = normalizeCode(bootCode());
+  const got = normalizeCode(given);
+  if (got.length < want.length) return false;
+  return safeEqual(got.slice(-want.length), want);
+}
