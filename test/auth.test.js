@@ -538,3 +538,20 @@ test('first run with ADMIN_TOKEN set shows the create-account screen (mode setup
   const status = { mode: 'setup', required: true, setupRequired: true, signupNeedsCode: true, user: null };
   assert.equal(needsAuthScreen(status), true);
 });
+
+test('security env vars tolerate case and stray whitespace (dashboard paste mistakes)', async () => {
+  const { config } = await import('../server/config.js');
+  const before = { ...process.env };
+  try {
+    delete process.env.SIGNUP_CODE;
+    process.env.Signup_Code = '  my-setup-code \n';
+    assert.equal(config.signupCode, 'my-setup-code');
+    delete process.env.Signup_Code;
+    process.env.SIGNUP_CODE = ' abc ';
+    assert.equal(config.signupCode, 'abc');
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in before)) delete process.env[k];
+    if (before.SIGNUP_CODE === undefined) delete process.env.SIGNUP_CODE;
+    else process.env.SIGNUP_CODE = before.SIGNUP_CODE;
+  }
+});

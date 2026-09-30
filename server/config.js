@@ -6,10 +6,14 @@ dotenv.config();
 
 /** Env lookup tolerant of case (e.g. `OpenRouter_API_KEY` vs `OPENROUTER_API_KEY`). */
 export function envAny(name) {
-  if (process.env[name]) return process.env[name];
-  const hit = Object.keys(process.env).find((k) => k.toUpperCase() === name.toUpperCase());
-  return hit ? process.env[hit] : '';
+  const raw = process.env[name] || (() => {
+    const hit = Object.keys(process.env).find((k) => k.toUpperCase() === name.toUpperCase());
+    return hit ? process.env[hit] : '';
+  })();
+  return String(raw || '').trim(); // a pasted secret with a trailing newline/space is a classic dashboard mistake
 }
+
+const isTrue = (v) => /^(true|1|yes|on)$/i.test(String(v || '').trim());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -71,15 +75,15 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
   dataDir: process.env.DATA_DIR || path.join(root, 'data'),
-  adminToken: process.env.ADMIN_TOKEN || '',
+  adminToken: envAny('ADMIN_TOKEN'),
   corsOrigin: process.env.CORS_ORIGIN || '', // empty = same-origin only
-  trustProxy: process.env.TRUST_PROXY === 'true',
+  trustProxy: isTrue(envAny('TRUST_PROXY')),
   // Auth settings are read at call time so they can be changed (and tested) without re-importing.
   get appSecret() {
-    return process.env.APP_SECRET || '';
+    return envAny('APP_SECRET');
   },
   get signupCode() {
-    return process.env.SIGNUP_CODE || '';
+    return envAny('SIGNUP_CODE');
   },
   /** Deployed (NODE_ENV=production or Render): cookies are always Secure, HSTS is sent, setup fails closed. Read at call time. */
   get isProduction() {
@@ -87,10 +91,10 @@ export const config = {
   },
   /** Fail closed while no account exists: production, Render, or REQUIRE_SETUP=true. */
   get requireSetup() {
-    return this.isProduction || process.env.REQUIRE_SETUP === 'true';
+    return this.isProduction || isTrue(envAny('REQUIRE_SETUP'));
   },
   get allowSignup() {
-    return process.env.ALLOW_SIGNUP === 'true';
+    return isTrue(envAny('ALLOW_SIGNUP'));
   },
   alpaca: {
     get key() {

@@ -20,7 +20,16 @@ export function createApp() {
   if (config.corsOrigin) app.use(cors({ origin: config.corsOrigin }));
   app.use(express.json({ limit: '20kb' }));
   app.use(rejectProtoKeys);
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // Page files must be re-validated on every load (cheap 304s via ETag): a browser or CDN that keeps an old app.js next to a
+  // new charts.js crashes the whole SPA with 'module does not provide an export'.
+  app.use(
+    express.static(path.join(__dirname, '..', 'public'), {
+      etag: true,
+      setHeaders: (res, file) => {
+        if (/\.(html|js|css|json|map)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
+      },
+    }),
+  );
   app.use('/api', requestLogger, api);
   app.get('*', (_req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
