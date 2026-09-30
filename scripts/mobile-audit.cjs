@@ -496,6 +496,8 @@ async function ensurePositions(ctx) {
       await new Promise((r) => setTimeout(r, 500));
       if (!(await get('run/status')).running) break;
     }
+    // the trader only PROPOSES; approve the queue (newer servers) so there are open positions to audit
+    await ctx.request.post(`${BASE}/api/proposals/approve-all`, { data: {}, headers: { 'content-type': 'application/json' } });
   } catch {
     /* best effort */
   }
@@ -643,7 +645,10 @@ async function main() {
         const open = await page.evaluate(() => document.querySelectorAll('#pos-open [data-pos]').length);
         if (!open) {
           await page.click('#btn-scan');
-          await page.waitForFunction(() => document.querySelectorAll('#pos-open [data-pos]').length > 0, null, { timeout: 30000 }).catch(() => {});
+          await page.waitForFunction(() => !document.querySelector('#btn-scan')?.disabled && document.querySelector('.run-bar'), null, { timeout: 30000 }).catch(() => {});
+          await ctx.request.post(`${BASE}/api/proposals/approve-all`, { data: {}, headers: { 'content-type': 'application/json' } });
+          await page.reload();
+          await waitLoaded(page);
         }
         ranOnce = true;
       }
