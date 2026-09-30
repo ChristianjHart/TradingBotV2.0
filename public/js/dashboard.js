@@ -1,8 +1,16 @@
 import { clsPos, escapeHtml as esc, fmtMoney, fmtTime } from './api.js';
 import { donutGradient } from './run-logic.js';
 import { patchPerf, perfShellHtml } from './performance.js';
-import { applyPosTab, patchPositions, posClick, posKey, tfButtonsHtml, tfClick } from './positions.js';
-import { patchRunBar, startRun } from './run.js';
+import { applyPosTab, patchPositions, posChange, posClick, posKey, tfButtonsHtml, tfClick } from './positions.js';
+import { patchBudgetWidget } from './budget.js';
+import { bindProposals, patchProposals, proposalsShellHtml, setRerun } from './proposals.js';
+import { onRunClick, patchRunBar, startRun } from './run.js';
+import { bindSections, applySections, patchSectionSummaries, sectionHeadHtml } from './sections.js';
+import { budgetView } from './ai-logic.js';
+import { currentBudget } from './budget.js';
+import { bindNews, newsSectionSummary, patchNews } from './news.js';
+import { patchScheduleWidget, scheduleSectionSummary } from './schedule.js';
+import { newsRunStatus } from './news-logic.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
 /* ---------- dashboard widgets ---------- */
@@ -13,17 +21,32 @@ export function summaryHtml() {
   const sm = state.summary;
   const picksN = state.picks?.picks?.length || 0;
   if (!state.loaded) return skeleton(3);
-  if (!sm || !sm.at) return empty('Press RUN — the scanner bot ranks the top picks, then the trader bot decides which to simulate.');
-  const n = sm.trades?.length || 0;
-  const who = sm.traderSource === 'ai' ? 'AI' : 'Rule-based bot';
-  const head = n ? `${who} simulated ${n} trade${n === 1 ? '' : 's'} from a top ${sm.picks || picksN}` : `${who} simulated no trades from a top ${sm.picks || picksN}`;
+  if (!sm || !sm.at) return empty('Press RUN: the AI scanner ranks the top picks, then the AI trader proposes trades for you to approve.');
+  const props = sm.proposals || [];
+  const made = sm.proposalCount ?? props.length;
+  const pending = state.status?.proposalsPending ?? state.proposals?.counts?.pending ?? 0;
+  const topN = sm.picks || picksN;
+  const head = made ? `AI proposed ${made} trade${made === 1 ? '' : 's'} from a top ${topN}` : `AI proposed no trades from a top ${topN}`;
+  const auto = Number(sm.autoApproved) || 0;
+  const status = made
+    ? `${pending ? `<a class="prop-link" href="#dashboard" data-jump="sec-proposals">${pending} pending your approval</a>` : 'none pending: all decided'}${auto ? `, ${auto} auto-approved within your caps` : ''}`
+    : 'nothing to approve';
+  const who = sm.traderSource === 'demo' || sm.demo ? '<span class="badge-demo">DEMO DATA</span> ' : '';
   return `
     <div class="sum-head">${esc(head)}</div>
+    <div class="sum-status">${who}${status}</div>
     <div class="dim sum-when">${esc(new Date(sm.at).toLocaleString())} · scanner ${esc(sm.scannerModel || sm.scannerSource)} · trader ${esc(sm.traderModel || sm.traderSource)}</div>
     ${sm.note ? `<p class="sum-note">${esc(sm.note)}</p>` : ''}
-    ${n ? `<ul class="sum-list">${sm.trades.map((t) => `<li><span class="sym">${esc(t.symbol)}</span> <span class="pill pill-${esc(t.side)}">${esc(t.side)}</span>
-        <span class="mono dim">${fmtMoney(t.allocation, 0)}</span> — ${esc(t.reason)}</li>`).join('')}</ul>` : ''}
+    ${newsLineSummary(sm.news)}
+    ${props.length ? `<ul class="sum-list">${props.map((t) => `<li><span class="sym">${esc(t.symbol)}</span> <span class="pill pill-${esc(t.side)}">${esc(t.side)}</span>
+        <span class="mono dim">${fmtMoney(t.allocationUsd ?? t.allocation, 0)}</span> <span class="sum-r clamp">— ${esc(t.reason)}</span></li>`).join('')}</ul>` : ''}
     ${(sm.rejected || []).length ? `<div class="dim sum-rej">Passed on: ${sm.rejected.map(esc).join(', ')}</div>` : ''}`;
+}
+
+function newsLineSummary(news) {
+  const ns = newsRunStatus(news);
+  if (!ns) return '';
+  return `<div class="news-line news-${ns.tone}"><strong><span aria-hidden="true">${{ ok: '✓', warn: '!', bad: '✕' }[ns.tone]}</span> ${esc(ns.title)}</strong> <span>${esc(ns.text)}</span>${ns.link ? ` <a class="prop-link" href="${esc(ns.link.href)}">${esc(ns.link.label)}</a>` : ''}</div>`;
 }
 
 export function allocationHtml() {
@@ -73,11 +96,11 @@ export function bannersHtml() {
   const s = state.status || {};
   const out = [];
   if (state.loadError) out.push(`<div class="notice" role="alert">Can’t reach the server (${esc(state.loadError)}). Showing the last data received${state.lastUpdate ? ` at ${esc(fmtTime(state.lastUpdate))}` : ''}; retrying automatically.</div>`);
-  if (s.mockData) out.push('<div class="banner-mock">Running on <strong>mock</strong> market data — <a href="#settings">Add your Alpaca keys under Settings → Account</a> for live scans. Prices and results are synthetic.</div>');
+  if (s.mockData) out.push('<div class="banner-mock">Running on <strong>mock</strong> market data — <a href="#settings/account">Add your Alpaca keys under Settings → Account</a> for live scans. Prices and results are synthetic.</div>');
   else if (s.fallbacks?.count) out.push(`<div class="banner-mock">Live data failed for ${s.fallbacks.count} symbol(s) — showing MOCK prices for: ${(s.fallbacks.symbols || []).map((f) => `<code title="${esc(f.error)}">${esc(f.symbol)}</code>`).join(' ')}</div>`);
   if (s.marketOpen === false) out.push('<div class="banner-mock">US stock market is closed — stock prices are the last close and stock stops are not evaluated. Crypto trades 24/7.</div>');
   if ((s.staleSymbols || []).length) out.push(`<div class="banner-mock">Stale quotes: ${s.staleSymbols.map((x) => `<code>${esc(x)}</code>`).join(' ')}</div>`);
-  if (state.status && !s.openrouterConfigured) out.push('<div class="notice">OpenRouter key missing — the run uses the rule-based fallback instead of AI. <a href="#settings">Add it under Settings → Account</a>.</div>');
+  if (s.ai?.demo) out.push('<div class="banner-mock"><span class="badge-demo">DEMO DATA</span> The AI is the built-in test fixture: proposals are canned, not a real analysis. Add your OpenRouter key under Settings → Account for the real AI.</div>');
   return out.join('');
 }
 
@@ -85,34 +108,28 @@ export function sysStripHtml() {
   const s = state.status;
   if (!s) return '';
   const w = s.worker?.status;
-  return `Data: ${esc(s.dataMode || '?')} · Supabase: ${s.supabaseConfigured ? 'yes' : 'no'} · OpenRouter: ${s.openrouterConfigured ? 'yes' : '<a class="neg" href="#settings" title="Add your OpenRouter key under Settings → Account">MISSING</a>'}${w && w !== 'online' ? ` · Worker: <span class="neg">${esc(w)}</span>` : ''}`;
+  return `Data: ${esc(s.dataMode || '?')} · Supabase: ${s.supabaseConfigured ? 'yes' : 'no'} · OpenRouter: ${s.openrouterConfigured ? 'yes' : '<a class="neg" href="#settings/account" title="Add your OpenRouter key under Settings → Account">MISSING</a>'}${w && w !== 'online' ? ` · Worker: <span class="neg">${esc(w)}</span>` : ''}`;
 }
 
-/** Label for the picks source, derived from picks.source + /api/status openrouterConfigured. */
+/** Label for the picks source. There is no rule-based fallback: picks are from the AI (or the demo fixture). */
 export function picksBadge(st) {
   if (!st?.picks?.length) return { text: '', title: '' };
-  if (st.source === 'ai') return { text: `AI · ${st.model || ''}`, title: 'Ranked by the AI scanner' };
-  const configured = state.status?.openrouterConfigured;
-  if (configured) {
-    const why = st.fallbackReason || st.aiError || st.error || st.reason || st.note || '';
-    return { text: `RULE-BASED · AI call failed — rule-based fallback used${why ? ` (${String(why).slice(0, 90)})` : ''}`, title: why ? `Reason: ${why}` : 'The OpenRouter key is configured, but the AI call failed; rule-based picks were used instead.' };
-  }
-  if (configured === false) return { text: 'RULE-BASED (no OpenRouter key)', title: 'Add an OpenRouter key to enable AI picks' };
-  return { text: 'RULE-BASED', title: '' };
+  if (st.source === 'demo') return { text: 'DEMO DATA · test AI', title: 'Produced by the built-in test AI (not a real analysis)' };
+  return { text: `AI${st.model ? ` · ${st.model}` : ''}`, title: 'Ranked by the AI scanner' };
 }
 
 export function picksHtml() {
   if (!state.loaded) return skeleton(5);
   const picks = state.picks?.picks || [];
-  if (!picks.length) return empty('Press RUN — the scanner bot will rank the top 100 symbols');
-  return `<div class="scroll-y" tabindex="0" role="region" aria-label="Scanner picks table"><table class="table cards">
+  if (!picks.length) return empty('Press RUN: the AI scanner will rank the top symbols');
+  return `<div class="scroll-y" tabindex="0" role="region" aria-label="Scanner picks table"><table class="table cards t-picks${state.picksAll ? ' show-all' : ''}">
     <thead><tr><th scope="col">#</th><th scope="col">SYMBOL</th><th scope="col">DIR</th><th scope="col">CONF</th><th scope="col">REASON</th></tr></thead>
     <tbody>${picks.map((p, i) => `<tr>
       <td class="dim mono" data-label="Rank">${i + 1}</td>
       <td class="sym" data-label="Symbol">${esc(p.symbol)}</td>
       <td data-label="Direction"><span class="pill pill-${esc(p.direction)}">${esc(p.direction)}</span></td>
       <td class="mono" data-label="Confidence">${(p.confidence * 100).toFixed(0)}%</td>
-      <td class="reason" data-label="Reason">${esc(p.reason)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td class="reason" data-label="Reason"><div class="clamp">${esc(p.reason)}</div></td></tr>`).join('')}</tbody></table></div>${picks.length > 10 ? `<button type="button" class="btn-ghost picks-more" id="picks-more" aria-pressed="${!!state.picksAll}">${state.picksAll ? 'Show top 10 only' : `Show all ${picks.length} picks`}</button>` : ''}`;
 }
 
 export function mountDashboard() {
@@ -122,19 +139,28 @@ export function mountDashboard() {
       <span class="dim" id="upd" aria-live="off"></span>
       <div class="toolbar-actions"><button class="btn-accent" id="btn-scan" type="button">RUN</button></div>
     </div>
+    <div id="run-gate"></div>
     <div id="run-bar" role="status" aria-live="polite"></div>
+    ${proposalsShellHtml()}
+    <div class="grid grid-news">
+    <section class="widget news-card" aria-labelledby="h-news" id="dsec-news" data-dsec="news">${sectionHeadHtml('news')}<h2 class="widget-title" id="h-news"><span>NEWS &amp; EARNINGS</span><span class="dim" id="news-sub"></span></h2><div id="w-news"></div></section>
+    <section class="widget sched-widget" aria-labelledby="h-sched-w" id="dsec-sched" data-dsec="sched">${sectionHeadHtml('sched')}<h2 class="widget-title" id="h-sched-w"><span>SCHEDULE</span><a class="dim" href="#settings/schedule">Manage →</a></h2><div id="w-sched"></div></section>
+    </div>
     <div class="grid grid-top">
-      <section class="widget ai-summary" aria-labelledby="h-sum"><h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
-      <section class="widget allocation-box" aria-labelledby="h-alloc"><h2 class="widget-title" id="h-alloc">ALLOCATION</h2><div id="w-alloc"></div></section>
-      <section class="widget model-acc" aria-labelledby="h-acc"><h2 class="widget-title" id="h-acc">MODEL ACCURACY</h2><div id="w-acc"></div></section>
+      <section class="widget ai-summary" aria-labelledby="h-sum" id="dsec-sum" data-dsec="sum">${sectionHeadHtml('sum')}<h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
+      <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w" data-dsec="budget">${sectionHeadHtml('budget')}<h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
+      <section class="widget allocation-box" aria-labelledby="h-alloc" id="dsec-alloc" data-dsec="alloc">${sectionHeadHtml('alloc')}<h2 class="widget-title" id="h-alloc">ALLOCATION</h2><div id="w-alloc"></div></section>
+      <section class="widget model-acc" aria-labelledby="h-acc" id="dsec-acc" data-dsec="acc">${sectionHeadHtml('acc')}<h2 class="widget-title" id="h-acc">MODEL ACCURACY</h2><div id="w-acc"></div></section>
     </div>
     <div class="run-status dim" id="sys-strip"></div>
     <div class="grid grid-ai">
-      <section class="widget ai-picks" aria-labelledby="h-picks">
+      <section class="widget ai-picks" aria-labelledby="h-picks" id="dsec-picks" data-dsec="picks">
+        ${sectionHeadHtml('picks')}
         <h2 class="widget-title" id="h-picks"><span id="picks-title">SCANNER TOP PICKS</span><span class="dim" id="picks-badge"></span></h2>
         <div id="w-picks"></div>
       </section>
-      <section class="widget ai-positions" aria-labelledby="h-pos">
+      <section class="widget ai-positions" aria-labelledby="h-pos" id="dsec-pos" data-dsec="pos">
+        ${sectionHeadHtml('pos')}
         <h2 class="widget-title" id="h-pos"><span>POSITIONS (SIMULATED)</span></h2>
         <div class="pos-toolbar">
           <div class="tabs" role="tablist" aria-label="Positions">
@@ -154,11 +180,19 @@ export function mountDashboard() {
         </div>
       </section>
     </div>
-    <section class="widget perf-section" aria-labelledby="h-perf"><h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span><a class="dim" href="#performance">Details &amp; run history →</a></h2>${perfShellHtml()}</section>
+    <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf')}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span><a class="dim" href="#performance">Details &amp; run history →</a></h2>${perfShellHtml()}</section>
   </div>`;
+  bindSections(root);
+  applySections(root);
   $('btn-scan').addEventListener('click', startRun);
+  $('run-bar').addEventListener('click', onRunClick);
+  $('run-gate').addEventListener('click', onRunClick);
+  setRerun(startRun);
+  bindProposals();
+  bindNews();
   const pw = $('pos-open').parentElement;
   pw.addEventListener('click', posClick);
+  pw.addEventListener('change', posChange);
   pw.addEventListener('keydown', posKey);
   document.querySelector('.tabs[role=tablist]').addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
@@ -169,6 +203,11 @@ export function mountDashboard() {
     $(`tab-${state.posTab}`).focus();
   });
   $('tf-pos').addEventListener('click', tfClick);
+  $('w-picks').addEventListener('click', (e) => {
+    if (!e.target.closest('#picks-more')) return;
+    state.picksAll = !state.picksAll;
+    setHtml($('w-picks'), picksHtml());
+  });
   patchDashboard();
 }
 
@@ -177,6 +216,10 @@ export function patchDashboard() {
   setHtml($('banners'), bannersHtml());
   setHtml($('w-summary'), summaryHtml());
   setHtml($('w-alloc'), allocationHtml());
+  patchBudgetWidget();
+  patchProposals();
+  patchNews();
+  patchScheduleWidget();
   setHtml($('w-acc'), accuracyHtml());
   setHtml($('sys-strip'), sysStripHtml());
   const st = state.picks;
@@ -191,6 +234,29 @@ export function patchDashboard() {
   patchPerf();
   patchRunBar();
   patchUpdated();
+  patchSectionSummaries(sectionData());
+}
+
+/** Numbers for the collapsed-section summaries on phones. */
+function sectionData() {
+  const acct = state.positions?.account;
+  const bv = budgetView(currentBudget());
+  const p = state.perf;
+  const closed = p?.closed ?? acct?.closedCount ?? 0;
+  const wins = p?.wins ?? acct?.wins ?? 0;
+  const equity = Number(acct?.equity);
+  const cash = Number(acct?.cash);
+  return {
+    pos: { openCount: state.loaded ? (state.positions?.open || []).length : null, unrealized: Number(acct?.unrealizedPnl) },
+    sum: { proposalCount: state.summary?.at ? state.summary.proposalCount ?? state.summary.proposals?.length ?? 0 : null },
+    news: { text: newsSectionSummary() },
+    sched: { text: scheduleSectionSummary() },
+    budget: { spentText: bv?.spentText, capText: bv?.capText },
+    picks: { picksCount: state.loaded ? state.picks?.picks?.length || 0 : null },
+    perf: { netEdge: p?.netEdge == null ? NaN : Number(p.netEdge), closed },
+    acc: { closed, winRatePct: p?.winRate != null ? pctOf(p.winRate) : closed ? (wins / closed) * 100 : 0 },
+    alloc: { cashPct: equity > 0 && Number.isFinite(cash) ? (Math.max(0, cash) / equity) * 100 : NaN },
+  };
 }
 
 export function patchUpdated() {

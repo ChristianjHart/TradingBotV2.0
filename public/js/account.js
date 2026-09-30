@@ -1,5 +1,5 @@
 import { api, escapeHtml as esc } from './api.js';
-import { authErrorMessage, buildKeyPayload, keyStatus, validateModel, validatePasswordChange } from './auth-logic.js';
+import { authErrorMessage, buildKeyPayload, keyStatus, validatePasswordChange } from './auth-logic.js';
 import { forceLock } from './auth.js';
 import { refresh } from './data.js';
 import { hooks, state } from './state.js';
@@ -15,26 +15,29 @@ function chip(tone, label) {
 }
 
 function pwField(id, label, auto) {
-  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="${auto}" spellcheck="false" autocapitalize="none" required aria-describedby="${id}-e" /><span class="fld-err" id="${id}-e"></span></label>`;
+  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="${auto}" spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="${id === 'pw-conf' ? 'go' : 'next'}" required aria-describedby="${id}-e" /><span class="fld-err" id="${id}-e"></span></label>`;
 }
 
 function secretField(id, label, disabled) {
-  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" data-lpignore="true" ${disabled ? 'disabled' : ''} aria-describedby="${id}-e" placeholder="Paste to save or replace" /><span class="fld-err" id="${id}-e"></span></label>`;
+  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="${id === 'k-ak' ? 'next' : 'go'}" data-lpignore="true" ${disabled ? 'disabled' : ''} aria-describedby="${id}-e" placeholder="Paste to save or replace" /><span class="fld-err" id="${id}-e"></span></label>`;
 }
 
 function keyGroup(kind, a) {
   const g = a.keys?.[kind];
   const st = keyStatus(kind, g);
-  const title = kind === 'openrouter' ? 'OpenRouter' : 'Alpaca';
+  const title = { openrouter: 'OpenRouter', alpaca: 'Alpaca', finnhub: 'Finnhub' }[kind];
   const lock = a.encryptionReady === false;
   const t = testResults[kind];
   const fields =
     kind === 'openrouter'
       ? secretField('k-or', 'API key', lock)
-      : `${secretField('k-ak', 'Key ID', lock)}${secretField('k-as', 'Secret key', lock)}`;
+      : kind === 'finnhub'
+        ? secretField('k-fh', 'API key', lock)
+        : `${secretField('k-ak', 'Key ID', lock)}${secretField('k-as', 'Secret key', lock)}`;
   return `<form class="keygrp" data-kind="${kind}" novalidate aria-labelledby="kh-${kind}">
     <div class="keygrp-head"><h3 id="kh-${kind}">${title}</h3>${chip(st.tone, st.label)}</div>
-    ${st.consequence ? `<p class="dim keygrp-note">${esc(st.consequence)}</p>` : `<p class="dim keygrp-note">${kind === 'openrouter' ? 'AI scanner and trader bots are enabled.' : 'Live market data is enabled.'}</p>`}
+    ${kind === 'finnhub' ? '' : st.consequence ? `<p class="dim keygrp-note">${esc(st.consequence)}</p>` : `<p class="dim keygrp-note">${{ openrouter: 'AI scanner and trader bots are enabled.', alpaca: 'Live market data is enabled.', finnhub: 'Earnings dates are enabled.' }[kind]}</p>`}
+    ${kind === 'finnhub' ? '<p class="dim keygrp-note"><strong>Optional.</strong> Only used for earnings dates (so the AI can avoid trades right before earnings). A free key is enough: you get one by signing up at finnhub.io (type that address into your browser; the app never contacts it without your key). It is sent only from the server, never to your browser or the logs.</p>' : ''}
     <div class="keygrp-fields">${fields}</div>
     <div class="keygrp-actions">
       <button class="btn-accent" type="submit" data-act="save" ${lock ? 'disabled' : ''}>Save ${title} key${kind === 'alpaca' ? 's' : ''}</button>
@@ -50,8 +53,7 @@ function render() {
   const a = state.account;
   const created = a.createdAt ? new Date(a.createdAt) : null;
   const since = created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
-  const d = a.models?.defaults || {};
-  host.innerHTML = `
+    host.innerHTML = `
   <section class="widget acct-card" aria-labelledby="h-acct"><h2 class="widget-title" id="h-acct">ACCOUNT</h2>
     <dl class="kv"><dt>Email</dt><dd class="acct-mail">${esc(a.email || state.auth.user?.email || '—')}</dd><dt>Member since</dt><dd>${esc(since)}</dd></dl>
     <form class="settings-form pw-form" id="f-pw" novalidate aria-labelledby="h-pw">
@@ -69,14 +71,7 @@ function render() {
     <p class="dim keys-note">Keys are encrypted on the server and attached to your account. They are never sent back to the browser — only the last 4 characters are shown. Fields are always empty; paste a new value to replace a key.</p>
     ${keyGroup('openrouter', a)}
     ${keyGroup('alpaca', a)}
-  </section>
-  <section class="widget models-card" aria-labelledby="h-models"><h2 class="widget-title" id="h-models">MODELS</h2>
-    <form class="settings-form" id="f-models" novalidate>
-      <label for="m-scan">Scanner model<input id="m-scan" name="scanner" type="text" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.scanner ?? d.scanner ?? '')}" placeholder="${esc(d.scanner || 'vendor/model')}" aria-describedby="m-scan-h m-scan-e" /><span class="fld-hint" id="m-scan-h">Default: <code>${esc(d.scanner || '—')}</code></span><span class="fld-err" id="m-scan-e"></span></label>
-      <label for="m-trad">Trader model<input id="m-trad" name="trader" type="text" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.trader ?? d.trader ?? '')}" placeholder="${esc(d.trader || 'vendor/model')}" aria-describedby="m-trad-h m-trad-e" /><span class="fld-hint" id="m-trad-h">Default: <code>${esc(d.trader || '—')}</code></span><span class="fld-err" id="m-trad-e"></span></label>
-      <div class="form-err" role="alert" data-err></div>
-      <div class="row-actions"><button class="btn-accent" type="submit">Save models</button><button class="btn-ghost" type="button" id="btn-models-reset" ${d.scanner || d.trader ? '' : 'disabled'}>Reset to defaults</button></div>
-    </form>
+    ${keyGroup('finnhub', a)}
   </section>`;
   wire();
 }
@@ -151,13 +146,14 @@ function wire() {
 
   host.querySelectorAll('.keygrp').forEach((form) => {
     const kind = form.dataset.kind;
-    const first = kind === 'openrouter' ? '#k-or' : '#k-ak';
+    const first = { openrouter: '#k-or', alpaca: '#k-ak', finnhub: '#k-fh' }[kind];
+    const name = { openrouter: 'OpenRouter', alpaca: 'Alpaca', finnhub: 'Finnhub' }[kind];
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       setErr(form, '');
-      const vals = { openrouterKey: form.querySelector('#k-or')?.value, alpacaKey: form.querySelector('#k-ak')?.value, alpacaSecret: form.querySelector('#k-as')?.value };
+      const vals = { openrouterKey: form.querySelector('#k-or')?.value, alpacaKey: form.querySelector('#k-ak')?.value, alpacaSecret: form.querySelector('#k-as')?.value, finnhubKey: form.querySelector('#k-fh')?.value };
       const { payload, errors } = buildKeyPayload(kind, vals);
-      const ids = { openrouterKey: 'k-or', alpacaKey: 'k-ak', alpacaSecret: 'k-as' };
+      const ids = { openrouterKey: 'k-or', alpacaKey: 'k-ak', alpacaSecret: 'k-as', finnhubKey: 'k-fh' };
       form.querySelectorAll('.fld-err').forEach((n) => (n.textContent = ''));
       const keys = Object.keys(errors);
       keys.forEach((k) => {
@@ -169,7 +165,7 @@ function wire() {
           const summary = await api('/account/keys', { method: 'PUT', body: JSON.stringify(payload), skipAuthRedirect: false });
           form.querySelectorAll('input').forEach((i) => (i.value = '')); // clear immediately
           delete testResults[kind];
-          toast(`${kind === 'openrouter' ? 'OpenRouter' : 'Alpaca'} key saved`, 'success');
+          toast(`${name} key saved`, 'success');
           await afterKeysChange(summary, `.keygrp[data-kind="${kind}"] ${first}`);
         } catch (err) {
           if (err.code === 'encryption_not_configured') state.account = { ...state.account, encryptionReady: false };
@@ -194,8 +190,7 @@ function wire() {
       });
     });
     form.querySelector('[data-act=remove]').addEventListener('click', async (e) => {
-      const name = kind === 'openrouter' ? 'OpenRouter' : 'Alpaca';
-      const ok = await confirmDialog({ title: `Remove ${name} key${kind === 'alpaca' ? 's' : ''}?`, message: kind === 'openrouter' ? 'The bots will fall back to rule-based decisions (no AI) until you add a key again.' : 'The dashboard will fall back to synthetic mock data until you add keys again.', confirmText: 'Remove', danger: true });
+      const ok = await confirmDialog({ title: `Remove ${name} key${kind === 'alpaca' ? 's' : ''}?`, message: kind === 'openrouter' ? 'The AI scanner and trader will stop working (runs are blocked) until you add a key again.' : kind === 'finnhub' ? 'Earnings dates become unknown, so the earnings blackout cannot apply until you add a key again. Headlines and everything else keep working.' : 'The dashboard will fall back to synthetic mock data until you add keys again.', confirmText: 'Remove', danger: true });
       if (!ok) return;
       setErr(form, '');
       pending(e.target.closest('button'), 'Removing…', async () => {
@@ -210,46 +205,9 @@ function wire() {
       });
     });
   });
-
-  const mf = host.querySelector('#f-models');
-  const saveModels = (scanner, trader) =>
-    pending(mf.querySelector('button[type=submit]'), 'Saving…', async () => {
-      try {
-        const r = await api('/account/models', { method: 'PUT', body: JSON.stringify({ scannerModel: scanner, traderModel: trader }) });
-        state.account = { ...state.account, models: { ...(state.account.models || {}), ...(r?.models || { scanner, trader }) } };
-        mf.querySelector('#m-scan').value = state.account.models.scanner ?? scanner;
-        mf.querySelector('#m-trad').value = state.account.models.trader ?? trader;
-        toast('Models saved', 'success');
-      } catch (err) {
-        setErr(mf, errOf(err, 'generic'));
-      }
-    });
-  mf.addEventListener('submit', (e) => {
-    e.preventDefault();
-    setErr(mf, '');
-    const s = mf.querySelector('#m-scan');
-    const t = mf.querySelector('#m-trad');
-    const es = validateModel(s.value);
-    const et = validateModel(t.value);
-    mf.querySelector('#m-scan-e').textContent = es || '';
-    mf.querySelector('#m-trad-e').textContent = et || '';
-    s.toggleAttribute('aria-invalid', !!es);
-    t.toggleAttribute('aria-invalid', !!et);
-    if (es) return s.focus();
-    if (et) return t.focus();
-    saveModels(s.value.trim(), t.value.trim());
-  });
-  mf.querySelector('#btn-models-reset').addEventListener('click', () => {
-    const d = state.account.models?.defaults || {};
-    mf.querySelector('#m-scan').value = d.scanner || '';
-    mf.querySelector('#m-trad').value = d.trader || '';
-    mf.querySelector('#m-scan-e').textContent = '';
-    mf.querySelector('#m-trad-e').textContent = '';
-    mf.requestSubmit();
-  });
 }
 
-/** Mount the account/keys/models cards into `el`. Degrades to a short note on servers without the account API. */
+/** Mount the account/keys cards into `el`. Degrades to a short note on servers without the account API. */
 export async function mountAccount(el) {
   host = el;
   host.innerHTML = '<section class="widget" aria-busy="true"><h2 class="widget-title">ACCOUNT</h2><div class="skel-wrap" aria-hidden="true"><div class="skeleton"></div><div class="skeleton"></div></div></section>';

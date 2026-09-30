@@ -2,10 +2,11 @@ import './setup.js';
 import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { fake, resetFake, bar, ago, mkPos } from './helpers.js';
+import { fake, resetFake, bar, ago, mkPos, stubOpenRouter } from './helpers.js';
 
 const { store, MAX_POSITIONS } = await import('../server/db/store.js');
 const { runTraderBot } = await import('../server/services/traderBot.js');
+const { approveAll } = await import('../server/services/proposals.js');
 const { getAccount, closeAll } = await import('../server/services/positions.js');
 const { usMarketOpen, etDayStart } = await import('../server/services/market.js');
 const { dailyPnl } = await import('../server/services/risk.js');
@@ -19,23 +20,26 @@ const START = config.paperEquity;
 const pick = (symbol, direction, price = 100) => ({ symbol, direction, confidence: 0.8, price, atrPct: 2, reason: 'test' });
 beforeEach(() => {
   resetFake();
+  stubOpenRouter();
   store.setPositions([]);
+  store.setProposals([]);
   store.setSettings({ ...store.getSettings(), slippageBps: 5, feeBps: 5, breakEven: true, trailR: 0 });
 });
 
 test('trader refetches a fresh quote for entry (not the scanner price)', async () => {
   fake.bars.set('AAPL', [bar(1, 120, 121, 119, 120)]);
   const r = await runTraderBot([pick('AAPL', 'long', 100)]); // scanner said 100, market is 120
-  assert.equal(r.opened.length, 1);
-  assert.ok(Math.abs(r.opened[0].entry - 120 * 1.0005) < 0.01);
-  assert.ok(r.opened[0].stopLoss < 120 && r.opened[0].stopLoss > 100);
+  assert.equal(r.proposals.length, 1);
+  assert.equal(r.proposals[0].entry, 120); // fresh quote, not the scanner's 100
+  assert.ok(Math.abs(r.proposals[0].entryFill - 120 * 1.0005) < 0.01);
+  assert.ok(r.proposals[0].stopLoss < 120 && r.proposals[0].stopLoss > 100);
 });
 
 test('trader skips stale or unavailable quotes and records "stale quote"', async () => {
   fake.stale.add('AAPL');
   fake.fail.add('MSFT');
   const r = await runTraderBot([pick('AAPL', 'long'), pick('MSFT', 'long')]);
-  assert.equal(r.opened.length, 0);
+  assert.equal(r.proposals.length, 0);
   assert.equal(r.skippedList.length, 2);
   assert.ok(r.skippedList.every((s) => /stale quote/.test(s)));
 });
@@ -43,7 +47,7 @@ test('trader skips stale or unavailable quotes and records "stale quote"', async
 test('trader records replaced (out-of-range / wrong-side) stops in notes and adjustedList', async () => {
   fake.bars.set('AAPL', [bar(1, 120, 121, 119, 120)]); // scanner price 100 -> rule stop 96 is 20% below the real entry
   const r = await runTraderBot([pick('AAPL', 'long', 100)]);
-  assert.equal(r.opened.length, 1);
+  assert.equal(r.proposals.length, 1);
   assert.equal(r.adjustedList.length >= 1, true);
   assert.ok(r.adjustedList.some((a) => /AAPL: stop .*out of range.*2 ATR/.test(a)));
   assert.match(r.note, /levels replaced/);
@@ -52,7 +56,8 @@ test('trader records replaced (out-of-range / wrong-side) stops in notes and adj
 
 test('account math: fees and slippage are deducted exactly once (open and closed)', async () => {
   const r = await runTraderBot([pick('AAPL', 'long'), pick('XOM', 'short')]);
-  assert.equal(r.opened.length, 2);
+  assert.equal(r.proposals.length, 2);
+  assert.equal((await approveAll()).approved.length, 2);
   const px = 100; // mark price for the fake
   const open = store.getPositions();
   const fees = open.reduce((s, p) => s + p.fees, 0);
@@ -251,8 +256,16 @@ test('run flow with fake alpaca: POST /run -> positions, performance, status', a
   const summary = (await api('/ai/summary')).body;
   assert.ok(summary.runId && !summary.error);
   assert.ok(Array.isArray(summary.rejected) && Array.isArray(summary.adjusted));
+  assert.ok(summary.proposalCount > 0 && summary.proposals.length === summary.proposalCount);
+  assert.equal(st.body.proposals, summary.proposalCount);
+  // the trader only proposes: nothing is open until the owner approves
+  assert.equal((await api('/positions')).body.open.length, 0);
+  const props = (await api('/proposals?status=pending')).body;
+  assert.equal(props.proposals.length, summary.proposalCount);
+  const one = await api(`/proposals/${props.proposals[0].id}/approve`, { method: 'POST' });
+  assert.equal(one.status, 200, JSON.stringify(one.body));
   const positions = (await api('/positions')).body;
-  assert.equal(positions.open.length, summary.trades.length);
+  assert.equal(positions.open.length, 1);
   assert.ok(positions.open.every((p) => p.expired === false && p.stale === false));
   assert.equal(positions.account.openCount, positions.open.length);
   const perf = (await api('/performance')).body;

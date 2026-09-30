@@ -31,7 +31,15 @@ const defaults = {
     paper: true,
     tradingEnabled: false,
     autoScan: true, // keep monitoring positions on a schedule
-    autoRun: false, // scheduled AI runs (costs OpenRouter credits) — opt in
+    autoRun: false, // LEGACY: superseded by settings.schedule (kept so old clients/settings files stay valid; no longer triggers runs)
+    // Run schedules (see services/scheduler.js). Everything off until the owner enables it.
+    schedule: {
+      enabled: false,
+      plan: 'B', // 'A' | 'B' | 'C' | 'D' | 'custom'
+      custom: [], // [{ time:'HH:MM' (ET), days:'weekdays'|'daily', scope:'stocks'|'crypto'|'all' }]
+      cryptoRuns: [], // ET, daily — opt-in (each crypto run costs the same as a stock run)
+      eventTriggers: { enabled: false, spyMovePct: 1.0, btcMovePct: 2.5, shortlistMovePct: 3.0, minMinutesBetweenEventRuns: 120, maxEventRunsPerDay: 2, newsCatalyst: false },
+    },
     watchlistSize: config.watchlistSize,
     horizonHours: config.predictionHorizonHours,
     slippageBps: config.trading.slippageBps,
@@ -42,6 +50,17 @@ const defaults = {
     maxClassPct: config.trading.maxClassPct,
     maxPerGroup: config.trading.maxPerGroup,
     dailyLossHaltPct: config.trading.dailyLossHaltPct,
+    // Trade proposals (the trader bot only PROPOSES; the owner approves).
+    proposalTtlHours: config.ai.proposalTtlHours, // a pending proposal expires after this many hours
+    autoApprove: false, // OFF by default: nothing is ever opened without an explicit approval unless the owner flips this
+    autoApproveMaxAllocPct: 5, // auto-approval only for proposals whose allocation is <= this % of equity
+    // News & earnings bot (optional context stage; see services/newsNotes.js). Earnings within `earningsBlackoutDays` => proposal auto-rejected.
+    news: { enabled: true, maxSymbols: 30, earningsBlackoutDays: 2, allowEarningsTrades: false, blockingFlags: ['halt', 'legal'] },
+    // AI spend governor (USD per UTC calendar month, all bots).
+    monthlyAiBudgetUsd: config.ai.monthlyBudgetUsd,
+    // netEdge = realizedPnl - drawdownWeight x maxDrawdownUsd + avoidedWeight x avoidedLoss
+    netEdgeDrawdownWeight: 0.5,
+    netEdgeAvoidedWeight: 1,
   },
   worker: {
     status: 'online',
@@ -65,6 +84,10 @@ const files = {
   pickScores: path.join(config.dataDir, 'pick-scores.json'),
   positionsArchive: path.join(config.dataDir, 'positions-archive.json'),
   dayStart: path.join(config.dataDir, 'day-start.json'),
+  proposals: path.join(config.dataDir, 'proposals.json'),
+  aiSpend: path.join(config.dataDir, 'ai-spend.json'),
+  scheduleState: path.join(config.dataDir, 'schedule-state.json'),
+  research: path.join(config.dataDir, 'research-notes.json'),
 };
 
 export const MAX_POSITIONS = 1000;
@@ -199,6 +222,45 @@ export const store = {
   },
   getPositionsArchive() {
     return readJson(files.positionsArchive, []);
+  },
+
+  /** Trade proposals (approval queue), newest first. Pending ones are never trimmed away. */
+  getProposals() {
+    return cached('proposals', files.proposals, []);
+  },
+  setProposals(data) {
+    const MAX = 2000;
+    let keep = data;
+    if (data.length > MAX) {
+      const room = Math.max(0, MAX - data.filter((p) => p.status === 'pending').length);
+      let seen = 0;
+      keep = data.filter((p) => p.status === 'pending' || seen++ < room);
+    }
+    put('proposals', files.proposals, keep);
+  },
+
+  /** News & earnings research notes (newest first): [{id, runId, at, model, symbol, sentiment, catalyst, earningsInDays, riskFlags, summary, sources}]. */
+  getResearch() {
+    return cached('research', files.research, []);
+  },
+  setResearch(data) {
+    put('research', files.research, data.slice(0, 3000));
+  },
+
+  /** AI call ledger [{id, ts, bot, model, promptTokens, completionTokens, costUsd, costSource, ok, runId}], ascending by ts. */
+  getSpend() {
+    return cached('aiSpend', files.aiSpend, []);
+  },
+  setSpend(data) {
+    put('aiSpend', files.aiSpend, data.slice(-5000));
+  },
+
+  /** Durable scheduler state: which slots fired/skipped/missed (so a restart never double-fires), event-run counters, recent skips. */
+  getScheduleState() {
+    return { slots: {}, lastFiredKey: null, events: { day: null, count: 0, lastAt: null }, skips: [], ...cached('scheduleState', files.scheduleState, {}) };
+  },
+  setScheduleState(data) {
+    put('scheduleState', files.scheduleState, data);
   },
 
   /** Start-of-ET-day equity snapshot { day:'YYYY-MM-DD', equity } used for the daily loss halt. */

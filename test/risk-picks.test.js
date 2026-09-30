@@ -47,7 +47,7 @@ test('pick scoring, calibration and accuracy', () => {
 test('computePerformance summarises closed trades and drawdown', () => {
   const p = (pnl, source, t) => ({ status: 'closed', pnl, source, entry: 100, stopLoss: 95, initialStop: 95, qty: 10, openedAt: t, closedAt: t });
   const perf = computePerformance({
-    positions: [p(100, 'ai', '2026-01-01T00:00:00Z'), p(-50, 'rules', '2026-01-02T00:00:00Z')],
+    positions: [p(100, 'ai', '2026-01-01T00:00:00Z'), p(-50, 'demo', '2026-01-02T00:00:00Z')],
     startingEquity: 1000,
   });
   assert.equal(perf.closed, 2);

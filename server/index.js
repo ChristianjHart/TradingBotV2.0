@@ -2,11 +2,14 @@ import cron from 'node-cron';
 import { config } from './config.js';
 import { createApp } from './app.js';
 import { store } from './db/store.js';
-import { startAiRun } from './services/aiRun.js';
 import { scorePicks } from './services/pickScoring.js';
+import { scoreShadows } from './services/shadow.js';
+import { expireProposals } from './services/proposals.js';
+import { mockLlmEnabled } from './services/mockLlm.js';
 import { alpaca } from './services/alpaca.js';
 import { monitorPositions } from './services/positions.js';
-import { guarded, scheduledRunSkipReason } from './services/jobs.js';
+import { guarded } from './services/jobs.js';
+import { schedulerTick } from './services/scheduler.js';
 import { warnIfProxyMisconfigured } from './middleware.js';
 import { hydrateFromSupabase } from './db/hydrate.js';
 import { supabaseEnabled } from './db/supabase.js';
@@ -36,12 +39,15 @@ if (!config.appSecret) {
   if (near.length) console.warn(`[security] variables with similar but unrecognised names (ignored): ${near.join(', ')} — expected exactly ${exact.join(', ')}`);
 }
 
-const app = createApp();
-
-function workerAlive() {
-  const w = store.getWorker();
-  return w.status === 'online' || w.status === 'degraded';
+if (config.ai.mockLlmRequested) {
+  if (mockLlmEnabled()) {
+    const msg = 'MOCK_LLM is ON: the AI is replaced by a canned test fixture; every result is labelled DEMO DATA. Never use this for real decisions.';
+    console.warn(`\n[dev] WARNING: ${msg}\n`);
+    store.addLog({ level: 'warn', message: msg });
+  } // else: mockLlmEnabled() already logged the loud production refusal
 }
+
+const app = createApp();
 
 function bootWorker() {
   store.setWorker({ ...store.getWorker(), status: 'online' });
@@ -57,16 +63,16 @@ cron.schedule('*/5 * * * *', guarded('monitor', monitorPositions));
 // Score scanner picks whose horizon has passed.
 cron.schedule('*/15 * * * *', guarded('score', scorePicks));
 
-// Scheduled AI runs cost OpenRouter credits, so they are opt-in (settings.autoRun).
-const minutes = Math.max(5, config.scanIntervalMinutes);
-// startAiRun() itself refuses to start while a run is in flight (runState.running).
-cron.schedule(
-  `*/${minutes} * * * *`,
-  guarded('run', () => {
-    const settings = store.getSettings();
-    if (workerAlive() && settings.autoRun && !scheduledRunSkipReason() && !startAiRun()) store.addLog({ level: 'warn', message: 'cron run: a run is already in progress, skipping' });
-  }),
-);
+// Counterfactual (shadow) scores for decided proposals whose horizon has passed.
+cron.schedule('*/15 * * * *', guarded('shadow', scoreShadows));
+
+// Pending proposals expire after their TTL (default 6h).
+cron.schedule('*/5 * * * *', guarded('proposals', () => expireProposals()));
+
+// Scheduled + event-triggered AI runs (settings.schedule; off until the owner enables it). Every minute: slot check (ET wall clock,
+// durable fired-slot state, 20-min grace) and, when event triggers are on, a cheap no-LLM move poll every 5 minutes.
+const schedulerCtx = { lastPollAt: { value: 0 }, lastEventSkip: { at: 0 } };
+cron.schedule('* * * * *', guarded('schedule', () => schedulerTick(schedulerCtx)));
 
 const host = process.env.HOST || '0.0.0.0';
 app.listen(config.port, host, () => {

@@ -4,18 +4,20 @@ import { usersRepo } from '../db/users.js';
 import { encryptValue, decryptValue, encryptionReady } from './crypto.js';
 import { store } from '../db/store.js';
 import { signupState } from './policy.js';
+import { peekCatalog, FREE_MODEL_NOTES } from '../services/catalog.js';
 
 const state = { unreadable: false };
-const FIELDS = ['openrouterKey', 'alpacaKey', 'alpacaSecret'];
+const FIELDS = ['openrouterKey', 'alpacaKey', 'alpacaSecret', 'finnhubKey'];
 
 /** Decrypt the owner's stored keys/models and make them the active credentials (env vars remain the fallback). */
 export function applyOwnerCredentials() {
   const owner = usersRepo.owner();
-  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', scannerModel: '', traderModel: '' };
+  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
   state.unreadable = false;
   if (owner) {
     next.scannerModel = owner.models?.scannerModel || '';
     next.traderModel = owner.models?.traderModel || '';
+    next.newsModel = owner.models?.newsModel || '';
     for (const f of FIELDS) {
       const blob = owner.keys_enc?.[f];
       if (!blob) continue;
@@ -46,9 +48,10 @@ export function accountSummary(user) {
     createdAt: shown?.created_at ?? null,
     keys: {
       openrouter: { set: src.openrouter !== 'none', source: src.openrouter, last4: last4(c.openrouter.key) },
+      finnhub: { set: src.finnhub !== 'none', source: src.finnhub, last4: last4(c.finnhub.key) },
       alpaca: { set: src.alpaca !== 'none', source: src.alpaca, keyLast4: last4(c.alpaca.key), secretSet: Boolean(c.alpaca.secret) },
     },
-    models: { scanner: c.openrouter.scannerModel, trader: c.openrouter.traderModel, defaults: { scanner: defaults.scannerModel, trader: defaults.traderModel } },
+    models: { scanner: c.openrouter.scannerModel, trader: c.openrouter.traderModel, news: c.openrouter.newsModel, defaults: { scanner: defaults.scannerModel, trader: defaults.traderModel, news: defaults.newsModel } },
     encryptionReady: encryptionReady(),
     signupOpen: signupState().policyOpen,
     ...(state.unreadable ? { keysUnreadable: true } : {}),
@@ -64,13 +67,13 @@ function cleanKey(name, v) {
   return { value: t };
 }
 
-/** Body: {openrouterKey?, alpacaKey?, alpacaSecret?, clear?:['openrouter'|'alpaca']}. Returns {error,status,code} or {ok}. */
+/** Body: {openrouterKey?, alpacaKey?, alpacaSecret?, finnhubKey?, clear?:['openrouter'|'alpaca'|'finnhub']}. Returns {error,status,code} or {ok}. */
 export async function saveKeys(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 400, error: 'body must be a JSON object' };
   const owner = usersRepo.owner();
   if (!owner) return { status: 409, code: 'no_account', error: 'create an account first' };
   const clear = body.clear ?? [];
-  if (!Array.isArray(clear) || clear.some((c) => c !== 'openrouter' && c !== 'alpaca')) return { status: 400, error: "clear must be an array of 'openrouter' and/or 'alpaca'" };
+  if (!Array.isArray(clear) || clear.some((c) => c !== 'openrouter' && c !== 'alpaca' && c !== 'finnhub')) return { status: 400, error: "clear must be an array of 'openrouter', 'alpaca' and/or 'finnhub'" };
   const incoming = {};
   for (const f of FIELDS) {
     if (body[f] === undefined || body[f] === null || body[f] === '') continue;
@@ -83,8 +86,9 @@ export async function saveKeys(body) {
     return { status: 409, code: 'encryption_not_configured', error: 'APP_SECRET is not configured on the server, so API keys cannot be stored. Set APP_SECRET (a long random string) and restart.' };
   }
   const cur = getAccountCredentials();
-  const next = { openrouterKey: cur.openrouterKey, alpacaKey: cur.alpacaKey, alpacaSecret: cur.alpacaSecret };
+  const next = { openrouterKey: cur.openrouterKey, alpacaKey: cur.alpacaKey, alpacaSecret: cur.alpacaSecret, finnhubKey: cur.finnhubKey };
   if (clear.includes('openrouter')) next.openrouterKey = '';
+  if (clear.includes('finnhub')) next.finnhubKey = '';
   if (clear.includes('alpaca')) Object.assign(next, { alpacaKey: '', alpacaSecret: '' });
   Object.assign(next, incoming);
   if (!Object.keys(incoming).length && !clearing) return { status: 400, error: 'nothing to save' };
@@ -100,20 +104,31 @@ export async function saveKeys(body) {
 
 const MODEL_RE = /^[\w.\-:/]{1,100}$/;
 
+/**
+ * Body: {scannerModel?, traderModel?, newsModel?} ('' resets to the env default). Ids are validated by regex and, when the model
+ * catalog is already loaded, against it: an unknown id is ALLOWED but reported in `warnings`. `notes` carry the free-model caveats.
+ */
 export async function saveModels(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 400, error: 'body must be a JSON object' };
   const owner = usersRepo.owner();
   if (!owner) return { status: 409, code: 'no_account', error: 'create an account first' };
   const models = { ...(owner.models || {}) };
-  for (const [field, prop] of [['scannerModel', 'scannerModel'], ['traderModel', 'traderModel']]) {
+  const warnings = [];
+  const notes = [];
+  const catalog = peekCatalog();
+  for (const field of ['scannerModel', 'traderModel', 'newsModel']) {
     if (body[field] === undefined) continue;
     const v = typeof body[field] === 'string' ? body[field].trim() : null;
     if (v === null || (v !== '' && !MODEL_RE.test(v))) return { status: 400, error: `${field} must match [A-Za-z0-9_.-:/] (max 100 chars)` };
-    if (v) models[prop] = v;
-    else delete models[prop]; // empty = back to the env/default model
+    if (v) {
+      models[field] = v;
+      if (catalog && !catalog.some((m) => m.id === v)) warnings.push(`${field}: "${v}" is not in the OpenRouter catalog (saved anyway; a run will fail with model_unavailable if it does not exist)`);
+      if (!catalog) warnings.push(`${field}: the model catalog is not loaded, so "${v}" could not be checked (open the model picker / GET /api/models first)`);
+      if (v.endsWith(':free') || catalog?.find((m) => m.id === v)?.isFree) notes.push(...FREE_MODEL_NOTES);
+    } else delete models[field]; // empty = back to the env/default model
   }
   await usersRepo.update(owner.id, { models: Object.keys(models).length ? models : null });
-  applyCredentials({ scannerModel: models.scannerModel || '', traderModel: models.traderModel || '' });
+  applyCredentials({ scannerModel: models.scannerModel || '', traderModel: models.traderModel || '', newsModel: models.newsModel || '' });
   store.addLog({ level: 'info', message: 'account model names updated' });
-  return { ok: true };
+  return { ok: true, warnings, notes: [...new Set(notes)] };
 }

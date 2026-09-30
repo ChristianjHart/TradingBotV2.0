@@ -18,12 +18,20 @@ export const state = {
   summary: null,
   perf: null,
   runs: null,
+  proposals: null, // {proposals:[pending…], counts}
+  history: null, // {proposals:[decided…], counts} (loaded lazily when the History tab is open)
+  budget: null, // full /api/budget
+  propTab: 'pending',
+  pendingBusy: {}, // proposal id -> 'approve' | 'reject'
+  pendingMsg: {}, // proposal id -> {tone,title,message,actions} shown inline on the card
+  settingsFocus: null, // 'account' | 'budget' | 'models' | null (scroll target after opening Settings)
   logs: null,
   auth: { required: false, mode: null, user: null, setupRequired: false, signupOpen: false, signupNeedsCode: false, guidance: '' },
   locked: false, // true while the sign-in screen is showing: polling/timers stop and no private data is kept
   account: null,
   run: null,
   runLastStage: null,
+  runDismissed: null, // `${runId}:${stage}` of a blocked/error message the owner closed
   posTab: 'open',
   sort: { key: 'pnl', dir: 'desc' },
   selectedPos: null,

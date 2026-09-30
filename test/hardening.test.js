@@ -3,7 +3,7 @@ import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
-import { fake, resetFake, bar, ago, mkPos } from './helpers.js';
+import { fake, resetFake, bar, ago, mkPos, stubOpenRouter, chatReply } from './helpers.js';
 
 const { store } = await import('../server/db/store.js');
 const { config } = await import('../server/config.js');
@@ -17,10 +17,11 @@ const { scorePicks, recordPicks } = await import('../server/services/pickScoring
 const { todaysPnl, startOfDayEquity, dailyPnlFromEquity } = await import('../server/services/risk.js');
 const { etDayStart, isStale, usMarketOpen, sessionMinutesBetween } = await import('../server/services/market.js');
 const { simulateExit } = await import('../server/services/exits.js');
-const { reasonsFor } = await import('../server/services/predictor.js');
+const { approveAll } = await import('../server/services/proposals.js');
 
 const pick = (symbol, direction, confidence = 0.8, price = 100) => ({ symbol, direction, confidence, price, atrPct: 2, reason: 'test' });
 const realFetch = globalThis.fetch;
+let llm;
 let server;
 let base;
 await new Promise((r) => (server = createApp().listen(0, '127.0.0.1', () => r((base = `http://127.0.0.1:${server.address().port}`)))));
@@ -34,6 +35,8 @@ const get = (p, opts) => realFetch(`${base}${p}`, opts);
 beforeEach(() => {
   resetFake();
   store.setPositions([]);
+  store.setProposals([]);
+  store.setSpend([]);
   store.setPickScores([]);
   store.setEquity([]);
   store.setDayStart(null);
@@ -42,6 +45,7 @@ beforeEach(() => {
   globalThis.fetch = realFetch;
   config.openrouter.key = '';
   config.paperEquity = 100000;
+  llm = stubOpenRouter();
 });
 
 // ---- 1. crash + async errors + security headers ----
@@ -112,7 +116,7 @@ test('monitor skips positions whose data failed and logs ONE line per cycle; not
 test('trader rejects candidates whose quote fails; scoring skips and retries later', async () => {
   fake.fail.add('AAPL');
   const r = await runTraderBot([pick('AAPL', 'long')]);
-  assert.equal(r.opened.length, 0);
+  assert.equal(r.proposals.length, 0);
   assert.equal(r.skippedList.length, 1);
   store.setPickScores([{ id: 'p1', runId: 'r', symbol: 'AAPL', direction: 'long', confidence: 0.7, price: 100, at: ago(30), dueAt: ago(3), scored: false }]);
   const s = await scorePicks();
@@ -144,28 +148,22 @@ test('sanitizePicks handles hostile shapes', () => {
   assert.equal(sanitizePicks({ picks: Array.from({ length: 100_000 }, () => ({ symbol: 'AAPL', direction: 'long', confidence: 2 })) }, known).length, 500);
 });
 
-function stubLlm(content) {
-  config.openrouter.key = 'k';
-  globalThis.fetch = (url, opts) =>
-    String(url).startsWith('http://127.0.0.1') ? realFetch(url, opts) : Promise.resolve(Response.json({ choices: [{ message: { content } }] }));
-}
-
-test('trader falls back to the rules trader (and logs) on a garbage LLM shape', async () => {
+test('trader: a garbage LLM shape gets ONE repair retry, then fails with invalid_output; nothing is proposed or opened', async () => {
   for (const content of ['"just a string"', '{"trades":"AAPL"}', '{"trades":[null,7,"x"]}']) {
-    store.setPositions([]);
-    stubLlm(content);
-    const r = await runTraderBot([pick('AAPL', 'long')]);
-    assert.equal(r.source, 'rules', content);
-    assert.equal(r.opened.length, 1);
+    llm = stubOpenRouter(() => content);
+    await assert.rejects(runTraderBot([pick('AAPL', 'long')]), (e) => e.code === 'invalid_output');
+    assert.equal(llm.calls.length, 2, content); // first call + exactly one repair retry
+    assert.equal(store.getProposals().length, 0);
+    assert.equal(store.getPositions().length, 0);
   }
-  assert.ok(store.getLogs().some((l) => /trader bot AI failed .*unusable JSON shape/.test(l.message)));
 });
 
-test('scanner falls back to rules on a hostile picks shape', async () => {
-  const data = ['AAPL', 'MSFT'].map((symbol) => ({ symbol, price: 100, atrPct: 2, bars: fake.bars.get(symbol) || Array.from({ length: 60 }, (_, i) => ({ t: ago(60 - i), o: 100 + i, h: 101 + i, l: 99 + i, c: 100 + i, v: 1000 })) }));
-  stubLlm('{"picks":{"AAPL":1}}');
-  const r = await runScannerBot(data, {});
-  assert.equal(r.source, 'rules');
+test('scanner: a hostile picks shape fails with invalid_output (no rules fallback) and previous picks stay', async () => {
+  const data = ['AAPL', 'MSFT'].map((symbol) => ({ symbol, price: 100, atrPct: 2, bars: [] , row: { symbol } }));
+  store.setAiPicks({ picks: [{ symbol: 'OLD', direction: 'long', confidence: 0.9 }], updatedAt: 'then', source: 'ai', model: 'm' });
+  llm = stubOpenRouter(() => '{"picks":{"AAPL":1}}');
+  await assert.rejects(runScannerBot(data, {}), (e) => e.code === 'invalid_output');
+  assert.equal(store.getAiPicks().picks[0].symbol, 'OLD');
 });
 
 // ---- 5. scorePicks race ----
@@ -206,8 +204,8 @@ test('daily P&L = equity now - start-of-ET-day equity; carried unrealized loss i
 // ---- 9. risk cap includes exit costs; worker status ----
 test('per-trade risk cap includes exit slippage and both fees', async () => {
   store.setSettings({ ...store.getSettings(), slippageBps: 50, feeBps: 50 });
-  const r = await runTraderBot([{ ...pick('AAPL', 'long'), atrPct: 7 }]); // rules stop = 2 ATR = 14% below entry
-  const p = r.opened[0];
+  const r = await runTraderBot([{ ...pick('AAPL', 'long'), atrPct: 7 }]); // test model stop = 2 ATR = 14% below entry
+  const p = { ...r.proposals[0], allocation: r.proposals[0].allocationUsd, entry: r.proposals[0].entryFill };
   const stopDist = (p.entry - p.stopLoss) / p.entry;
   assert.ok(Math.abs(stopDist - 0.14) < 0.01);
   const worstLoss = p.allocation * (stopDist + 0.005 + 0.01);
@@ -225,7 +223,7 @@ test('stopped/killed worker: /run is 409 and the trader opens nothing; monitor s
     assert.equal(body.code, 'worker_not_running');
     assert.match(body.error, new RegExp(status));
     const t = await runTraderBot([pick('AAPL', 'long')]);
-    assert.equal(t.opened.length, 0);
+    assert.equal(t.proposals.length, 0);
     assert.equal(t.workerStatus, status);
   }
   fake.bars.set('AAA', [bar(3, 100, 101, 90, 92)]);
@@ -278,26 +276,4 @@ test('NYSE 2028 calendar: closed on the real holidays, open on 2027-12-31 (New Y
   assert.equal(open('2028-07-03T17:30:00Z'), false); // closed after the 13:00 ET early close
   assert.equal(open('2028-11-24T18:30:00Z'), false);
   assert.equal(open('2028-11-24T17:30:00Z'), true); // 12:30 EST, before the early close
-});
-
-// ---- 11. rules fallback ----
-test('rule reasons agree with direction', () => {
-  const f = { rsi: 25, volumeRatio: 1 };
-  const c = { momentum: 0.6, macdScore: 0.4, trend: 0.5 };
-  const long = reasonsFor('long', f, c);
-  assert.ok(long.includes('RSI oversold (bounce setup)') && long.includes('strong short-term momentum'));
-  const short = reasonsFor('short', { rsi: 25, volumeRatio: 1 }, { momentum: -0.6, macdScore: -0.4, trend: -0.5 });
-  assert.ok(short.includes('fading momentum'));
-  assert.ok(!short.some((r) => /oversold/.test(r)), 'a short must not cite RSI oversold');
-  assert.ok(!reasonsFor('long', { rsi: 80, volumeRatio: 1 }, { momentum: 0.5, macdScore: 0, trend: 0 }).some((r) => /overbought/.test(r)));
-  assert.deepEqual(reasonsFor('short', { rsi: 50, volumeRatio: 1 }, { momentum: 0, macdScore: 0, trend: 0 }), ['composite score favours short']);
-});
-
-test('rules allocation is weighted by confidence within the caps', async () => {
-  const r = await runTraderBot([pick('AAPL', 'long', 0.95), pick('XOM', 'long', 0.8), pick('JPM', 'long', 0.65), pick('UNH', 'long', 0.5)]);
-  assert.equal(r.source, 'rules');
-  const a = Object.fromEntries(r.opened.map((p) => [p.symbol, p.allocation]));
-  assert.ok(a.AAPL >= a.XOM && a.XOM >= a.JPM && a.JPM > a.UNH, JSON.stringify(a));
-  assert.ok(a.UNH < 95000 / 4, 'lowest confidence gets less than an equal split');
-  assert.ok(Math.max(...Object.values(a)) <= 100000 * 0.2 + 0.01);
 });

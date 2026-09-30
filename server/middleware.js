@@ -1,5 +1,7 @@
 import net from 'node:net';
 import { config } from './config.js';
+import { validateSchedule } from './services/scheduler.js';
+import { validateNewsSettings } from './services/newsNotes.js';
 
 function expandV6(a) {
   let addr = a;
@@ -97,6 +99,12 @@ export const SETTING_RULES = {
   maxClassPct: num(1, 100),
   maxPerGroup: (v) => Number.isInteger(v) && v >= 1 && v <= 20,
   dailyLossHaltPct: num(0, 50),
+  autoApprove: bool, // OFF by default; only ever true when the owner switches it on
+  autoApproveMaxAllocPct: num(0.1, 25),
+  proposalTtlHours: num(0.25, 72),
+  monthlyAiBudgetUsd: num(0, 1000),
+  netEdgeDrawdownWeight: num(0, 10),
+  netEdgeAvoidedWeight: num(0, 10),
 };
 
 /** Returns { value } of accepted fields, or { error } naming the first bad/unknown one. */
@@ -105,6 +113,18 @@ export function validateSettings(body) {
   const value = Object.create(null);
   for (const [k, v] of Object.entries(body)) {
     if (k === 'tradingEnabled' || k === 'mode' || k === 'paper') continue; // locked, silently ignored
+    if (k === 'schedule') {
+      const r = validateSchedule(v);
+      if (r.error) return { error: r.error };
+      value.schedule = r.value; // partial; the route merges it into the stored schedule
+      continue;
+    }
+    if (k === 'news') {
+      const r = validateNewsSettings(v);
+      if (r.error) return { error: r.error };
+      value.news = r.value; // partial; the route merges it into the stored news settings
+      continue;
+    }
     if (!Object.hasOwn(SETTING_RULES, k)) return { error: `unknown setting: ${k}` }; // also rejects __proto__ / constructor / prototype
     if (!SETTING_RULES[k](v)) return { error: `invalid value for ${k}` };
     value[k] = v;

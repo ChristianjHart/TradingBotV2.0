@@ -40,7 +40,7 @@ create table if not exists public.ai_logs (
 create table if not exists public.watchlists (
   id          bigint generated always as identity primary key,
   created_at  timestamptz not null default now(),
-  source      text,                         -- 'ai' | 'rules'
+  source      text,                         -- 'ai' | 'demo'
   model       text,
   universe    integer,
   scanned     integer,

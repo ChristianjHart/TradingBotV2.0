@@ -74,14 +74,54 @@ function setTable(el, html) {
 }
 const pctStr = (a, b) => (a ? `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%` : 'n/a');
 
-function tooltipBox(ctx, w, x, y, lines, padTop = 4) {
+/** Pointer scrubbing that never fights page scroll: touch-action pan-y keeps vertical swipes scrolling the page,
+    horizontal drags scrub the crosshair. Mouse hover works as before. */
+function bindScrub(chart, canvas, move) {
+  canvas.style.touchAction = 'pan-y pinch-zoom';
+  canvas.style.webkitTouchCallout = 'none';
+  canvas.style.userSelect = 'none';
+  canvas.style.webkitUserSelect = 'none';
+  const clear = () => {
+    if (chart.hover != null) {
+      chart.hover = null;
+      chart.draw();
+    }
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    chart.touch = true;
+    move(e.clientX);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse') {
+      chart.touch = false;
+      move(e.clientX);
+    } else if (e.buttons || e.pressure > 0) {
+      chart.touch = true;
+      move(e.clientX);
+    }
+  });
+  canvas.addEventListener('pointercancel', clear); // the browser took the gesture over to scroll the page
+  canvas.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') clear();
+  });
+  // tapping anywhere else dismisses a touch tooltip
+  const away = (e) => {
+    if (e.target !== canvas) clear();
+  };
+  document.addEventListener('pointerdown', away, true);
+  chart._unbind = () => document.removeEventListener('pointerdown', away, true);
+}
+
+function tooltipBox(ctx, w, x, y, lines, padTop = 4, pinTop = false) {
   ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;
   const th = lines.length * 14 + 8;
   let bx = x + 12;
   if (bx + tw > w - 4) bx = x - 12 - tw;
   if (bx < 4) bx = 4;
-  const by = Math.max(padTop, y - th / 2);
+  if (pinTop && x > w / 2) bx = 4; // touch: keep the tooltip on the side away from the finger
+  const by = pinTop ? padTop : Math.max(padTop, y - th / 2);
   ctx.fillStyle = 'rgba(11,12,14,0.94)';
   ctx.strokeStyle = '#3a3f4b';
   ctx.lineWidth = 1;
@@ -114,12 +154,7 @@ export class CandleChart {
     this._draw = () => this.draw();
     this.ro = new ResizeObserver(() => requestAnimationFrame(this._draw));
     this.ro.observe(canvas.parentElement || canvas);
-    canvas.addEventListener('mousemove', (e) => this._move(e.clientX));
-    canvas.addEventListener('mouseleave', () => {
-      this.hover = null;
-      this.draw();
-    });
-    canvas.addEventListener('touchmove', (e) => e.touches[0] && this._move(e.touches[0].clientX), { passive: true });
+    bindScrub(this, canvas, (x) => this._move(x));
     canvas.addEventListener('keydown', (e) => {
       if (!this.vis?.length) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -140,6 +175,7 @@ export class CandleChart {
 
   destroy() {
     this.ro.disconnect();
+    this._unbind?.();
   }
 
   set({ bars, indicators, levels, markers, live, title }) {
@@ -193,20 +229,21 @@ export class CandleChart {
       return;
     }
     const ind = this.ind;
-    const padL = 8;
-    const padR = 58;
-    const padT = 10;
-    const padB = ind.vol ? 48 : 20;
-    const plotW = w - padL - padR;
-    const plotH = h - padT - padB;
-    this.geom = { padL, plotW };
-
     const extra = [...this.levels.map((l) => l.price), ...(this.live != null ? [this.live] : [])].filter(Number.isFinite);
     let min = Math.min(...slice.map((b) => b.l), ...extra);
     let max = Math.max(...slice.map((b) => b.h), ...extra);
     const pad = (max - min) * 0.08 || 1;
     min -= pad;
     max += pad;
+    ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    const axisW = Math.max(ctx.measureText(fmtP(max)).width, ctx.measureText(fmtP(min)).width, ctx.measureText(fmtP(this.live ?? slice[slice.length - 1].c)).width);
+    const padL = 8;
+    const padR = Math.round(Math.min(w * 0.42, Math.max(58, axisW + 14)));
+    const padT = 10;
+    const padB = ind.vol ? 48 : 22;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+    this.geom = { padL, plotW };
     const closes = slice.map((b) => b.c);
     const xAt = (i) => padL + (i + 0.5) * (plotW / slice.length);
     const yAt = (v) => padT + ((max - v) / (max - min)) * plotH;
@@ -215,7 +252,7 @@ export class CandleChart {
     ctx.strokeStyle = C.grid;
     ctx.lineWidth = 1;
     ctx.fillStyle = C.text;
-    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
     for (let i = 0; i < 4; i++) {
       const y = padT + (plotH / 3) * i;
       ctx.beginPath();
@@ -267,7 +304,7 @@ export class CandleChart {
     }
 
     // level lines (target / entry / stop)
-    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.font = '11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     this.levels.forEach((l) => {
       if (!Number.isFinite(l.price)) return;
       const y = yAt(l.price);
@@ -281,7 +318,7 @@ export class CandleChart {
       ctx.stroke();
       ctx.restore();
       const text = `${l.label} ${fmtP(l.price)}`;
-      const tw = ctx.measureText(text).width + 8;
+      const tw = Math.min(ctx.measureText(text).width + 8, w - padR - padL - 8);
       ctx.fillStyle = l.color;
       ctx.fillRect(padL + 4, y - 14, tw, 13);
       ctx.fillStyle = C.ink;
@@ -310,7 +347,7 @@ export class CandleChart {
       ctx.lineTo(x + 6, y - dir * 11);
       ctx.closePath();
       ctx.fill();
-      ctx.font = '700 10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.font = '700 11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       const lw = ctx.measureText(m.label).width;
       ctx.fillText(m.label, x + 8 + lw > w - padR ? x - 8 - lw : x + 8, y - dir * 8);
     });
@@ -333,7 +370,7 @@ export class CandleChart {
     ctx.fillStyle = this.live != null ? C.live : lp >= last.o ? C.up : C.down;
     const label = fmtP(lp);
     ctx.font = '11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-    ctx.fillRect(w - padR + 2, py - 9, ctx.measureText(label).width + 10, 18);
+    ctx.fillRect(w - padR + 2, py - 9, Math.min(padR - 2, ctx.measureText(label).width + 10), 18);
     ctx.fillStyle = C.ink;
     ctx.fillText(label, w - padR + 7, py + 4);
 
@@ -343,7 +380,7 @@ export class CandleChart {
     if (ind.ema21) legend.push(['EMA 21', '#3b82f6']);
     if (ind.vwap) legend.push(['VWAP', '#a855f7']);
     let lx = padL;
-    ctx.font = '10px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.font = '11px IBM Plex Sans, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     legend.forEach(([name, color]) => {
       ctx.fillStyle = color;
       ctx.fillRect(lx, h - 12, 8, 8);
@@ -366,7 +403,7 @@ export class CandleChart {
       ctx.lineTo(w - padR, yAt(b.c));
       ctx.stroke();
       ctx.restore();
-      tooltipBox(ctx, w, x, yAt(b.c), [fmtT(b.t), `O ${fmtP(b.o)}  H ${fmtP(b.h)}`, `L ${fmtP(b.l)}  C ${fmtP(b.c)}`, `Vol ${Math.round(b.v || 0).toLocaleString()}`]);
+      tooltipBox(ctx, w, x, yAt(b.c), [fmtT(b.t), `O ${fmtP(b.o)}  H ${fmtP(b.h)}`, `L ${fmtP(b.l)}  C ${fmtP(b.c)}`, `Vol ${Math.round(b.v || 0).toLocaleString()}`], 4, this.touch);
     }
 
     const first = slice[0];
@@ -410,12 +447,7 @@ export class LineChart {
     canvas.tabIndex = 0;
     this.ro = new ResizeObserver(() => requestAnimationFrame(() => this.draw()));
     this.ro.observe(canvas.parentElement || canvas);
-    canvas.addEventListener('mousemove', (e) => this._move(e.clientX));
-    canvas.addEventListener('mouseleave', () => {
-      this.hover = null;
-      this.draw();
-    });
-    canvas.addEventListener('touchmove', (e) => e.touches[0] && this._move(e.touches[0].clientX), { passive: true });
+    bindScrub(this, canvas, (x) => this._move(x));
     canvas.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
@@ -430,6 +462,7 @@ export class LineChart {
   }
   destroy() {
     this.ro.disconnect();
+    this._unbind?.();
   }
   /** points: [{t, v}]. opts.baseline: reference value (e.g. starting equity) that is always inside the y-range and drawn as a dashed line. */
   set(points, opts = {}) {
@@ -444,7 +477,8 @@ export class LineChart {
   _move(cx) {
     if (this.points.length < 2) return;
     const r = this.canvas.getBoundingClientRect();
-    const i = Math.round(((cx - r.left - 8) / (r.width - 8 - 62)) * (this.points.length - 1));
+    const g = this.geom || { padL: 8, padR: 62 };
+    const i = Math.round(((cx - r.left - g.padL) / (r.width - g.padL - g.padR)) * (this.points.length - 1));
     const c = Math.min(this.points.length - 1, Math.max(0, i));
     if (c !== this.hover) {
       this.hover = c;
@@ -463,10 +497,6 @@ export class LineChart {
       this._summary(`${this.title}: not enough data yet.`);
       return;
     }
-    const padL = 8;
-    const padR = 62;
-    const padT = 18;
-    const padB = 22;
     const vals = pts.map((p) => p.v);
     let min = Math.min(...vals);
     let max = Math.max(...vals);
@@ -485,11 +515,18 @@ export class LineChart {
     const pd = (max - min) * 0.08;
     min -= pd;
     max += pd;
+    ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    const axisW = Math.max(ctx.measureText(this.format(max)).width, ctx.measureText(this.format(min)).width);
+    const padL = 8;
+    const padR = Math.round(Math.min(w * 0.42, Math.max(62, axisW + 12)));
+    const padT = 20;
+    const padB = 24;
+    this.geom = { padL, padR };
     const x = (i) => padL + (i / (pts.length - 1)) * (w - padL - padR);
     const y = (v) => padT + ((max - v) / (max - min)) * (h - padT - padB);
     ctx.strokeStyle = C.grid;
     ctx.fillStyle = C.text;
-    ctx.font = '10px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.font = '11px IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
     const ticks = 4;
     for (let i = 0; i <= ticks; i++) {
       const gy = padT + ((h - padT - padB) / ticks) * i;
@@ -509,7 +546,7 @@ export class LineChart {
       const txt = Number.isNaN(d.getTime()) ? String(p.t) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const tw = ctx.measureText(txt).width;
       const tx = k === 0 ? padL : k === 2 ? w - padR - tw : x(ti) - tw / 2;
-      ctx.fillText(txt, tx, h - 6);
+      ctx.fillText(txt, tx, h - 7);
     });
     if (this.baseline != null) {
       ctx.save();
@@ -546,7 +583,7 @@ export class LineChart {
       ctx.arc(x(this.hover), y(p.v), 4, 0, Math.PI * 2);
       ctx.fillStyle = this.color;
       ctx.fill();
-      tooltipBox(ctx, w, x(this.hover), y(p.v), [p.t ? fmtT(p.t) : `#${this.hover + 1}`, this.format(p.v)]);
+      tooltipBox(ctx, w, x(this.hover), y(p.v), [p.t ? fmtT(p.t) : `#${this.hover + 1}`, this.format(p.v)], 4, this.touch);
     }
     const first = pts[0];
     const last = pts[pts.length - 1];

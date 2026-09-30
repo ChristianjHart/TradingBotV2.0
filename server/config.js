@@ -24,10 +24,12 @@ const envCred = {
   alpacaKey: process.env.ALPACA_API_KEY || '',
   alpacaSecret: process.env.ALPACA_API_SECRET || '',
   openrouterKey: envAny('OPENROUTER_API_KEY'),
+  finnhubKey: envAny('FINNHUB_API_KEY'),
   scannerModel: process.env.SCANNER_MODEL || 'deepseek/deepseek-v3.1-terminus',
   traderModel: process.env.TRADER_MODEL || 'deepseek/deepseek-chat-v3.1',
+  newsModel: process.env.NEWS_MODEL || 'deepseek/deepseek-chat-v3.1', // the news & earnings bot (optional context stage of a run)
 };
-const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', scannerModel: '', traderModel: '' };
+const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
 const credListeners = new Set();
 let mockOverride = null; // test hook / explicit override; null = read USE_MOCK_DATA at call time
 
@@ -51,13 +53,14 @@ export function onCredentialsChange(fn) {
 }
 
 export const getAccountCredentials = () => ({ ...acctCred });
-export const getEnvDefaults = () => ({ scannerModel: envCred.scannerModel, traderModel: envCred.traderModel });
+export const getEnvDefaults = () => ({ scannerModel: envCred.scannerModel, traderModel: envCred.traderModel, newsModel: envCred.newsModel });
 
 /** Where the active credential comes from: 'account' | 'env' | 'none'. */
 export function credentialSource() {
   const envAlpaca = Boolean(envCred.alpacaKey && envCred.alpacaSecret);
   return {
     openrouter: acctCred.openrouterKey ? 'account' : envCred.openrouterKey ? 'env' : 'none',
+    finnhub: acctCred.finnhubKey ? 'account' : envCred.finnhubKey ? 'env' : 'none',
     alpaca: acctAlpaca() ? 'account' : envAlpaca ? 'env' : 'none',
   };
 }
@@ -65,7 +68,7 @@ export function credentialSource() {
 /** Remove every active secret from a string (error text from upstream must never reach logs verbatim). */
 export function scrubSecrets(text) {
   let out = String(text ?? '');
-  for (const v of [acctCred.alpacaKey, acctCred.alpacaSecret, acctCred.openrouterKey, envCred.alpacaKey, envCred.alpacaSecret, envCred.openrouterKey]) {
+  for (const v of [acctCred.alpacaKey, acctCred.alpacaSecret, acctCred.openrouterKey, acctCred.finnhubKey, envCred.alpacaKey, envCred.alpacaSecret, envCred.openrouterKey, envCred.finnhubKey]) {
     if (v && v.length >= 6) out = out.split(v).join('[redacted]');
   }
   return out;
@@ -132,6 +135,42 @@ export const config = {
     set traderModel(v) {
       envCred.traderModel = v;
     },
+    get newsModel() {
+      return acctCred.newsModel || envCred.newsModel;
+    },
+    set newsModel(v) {
+      envCred.newsModel = v;
+    },
+  },
+  finnhub: {
+    get key() {
+      return acctCred.finnhubKey || envCred.finnhubKey;
+    },
+    set key(v) {
+      envCred.finnhubKey = v;
+    },
+  },
+  /** News & earnings stage. MOCK_NEWS=true (dev/test only) stubs the Alpaca-news + Finnhub clients; honoured only via mockNewsEnabled(). */
+  news: {
+    get mockRequested() {
+      return isTrue(envAny('MOCK_NEWS'));
+    },
+  },
+  /** AI spend governor + dev fixtures. Read at call time so they can be changed (and tested) without re-importing. */
+  ai: {
+    /** Monthly hard cap in USD (env default; the `monthlyAiBudgetUsd` setting overrides it). */
+    get monthlyBudgetUsd() {
+      const n = Number(envAny('MONTHLY_AI_BUDGET_USD'));
+      return envAny('MONTHLY_AI_BUDGET_USD') !== '' && Number.isFinite(n) && n >= 0 ? n : 20;
+    },
+    /** MOCK_LLM=true requested (dev/test only). Whether it is honoured is decided by mockLlmEnabled() (never in production). */
+    get mockLlmRequested() {
+      return isTrue(envAny('MOCK_LLM'));
+    },
+    get proposalTtlHours() {
+      const n = Number(envAny('PROPOSAL_TTL_HOURS'));
+      return envAny('PROPOSAL_TTL_HOURS') !== '' && Number.isFinite(n) && n > 0 ? n : 6;
+    },
   },
   paperEquity: Number(process.env.PAPER_EQUITY || 100000),
   maxOpenPositions: Number(process.env.MAX_OPEN_POSITIONS || 10),
@@ -165,4 +204,8 @@ export function hasAlpacaCredentials() {
 
 export function hasOpenRouterKey() {
   return Boolean(config.openrouter.key);
+}
+
+export function hasFinnhubKey() {
+  return Boolean(config.finnhub.key);
 }

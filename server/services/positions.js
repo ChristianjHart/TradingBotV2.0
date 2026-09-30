@@ -110,6 +110,7 @@ export function openPosition(t) {
   store.setPositions(positions);
   syncRow(pos);
   recordEquity();
+  return pos;
 }
 
 /** Close at `rawPrice`; market-type exits (stop, time, manual) pay slippage, limit fills (target) do not. */

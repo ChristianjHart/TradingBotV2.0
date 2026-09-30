@@ -69,8 +69,9 @@ export function formatLast4(v) {
 }
 
 const CONSEQUENCE = {
-  openrouter: 'OpenRouter not set → rule-based bots (no AI).',
+  openrouter: 'OpenRouter key not set: the AI can’t run, so RUN is disabled until you add one.',
   alpaca: 'Alpaca not set → mock data (synthetic prices).',
+  finnhub: 'Optional. Without it, earnings dates are unknown, so the earnings blackout cannot apply (headlines still work).',
 };
 
 /**
@@ -93,7 +94,12 @@ export function buildKeyPayload(kind, values) {
   const errors = {};
   const payload = {};
   const clean = (s) => String(s ?? '').trim();
-  if (kind === 'openrouter') {
+  if (kind === 'finnhub') {
+    const k = clean(values.finnhubKey);
+    if (!k) errors.finnhubKey = 'Paste your Finnhub API key.';
+    else if (/\s/.test(k) || k.length < 8 || k.length > 200) errors.finnhubKey = 'That does not look like a Finnhub key (no spaces, at least 8 characters).';
+    else payload.finnhubKey = k;
+  } else if (kind === 'openrouter') {
     const k = clean(values.openrouterKey);
     if (!k) errors.openrouterKey = 'Paste your OpenRouter API key.';
     else if (/\s/.test(k) || k.length < 8) errors.openrouterKey = 'That does not look like an API key (no spaces, at least 8 characters).';

@@ -4,11 +4,15 @@ import { bannersHtml, mountDashboard, patchDashboard, patchUpdated } from './das
 import { refresh } from './data.js';
 import { hydrateRun } from './run.js';
 import { loadLogs, mountLogs } from './logs.js';
+import { initMobile } from './mobile.js';
+import { patchBudgetCard, patchBudgetChip } from './budget.js';
 import { loadQuotes, mountMarket } from './market.js';
+import { applyBadge, tickProposals } from './proposals.js';
 import { loadRuns, mountPerformance, patchPerformancePage } from './performance.js';
 import { leftText, resetChartKey } from './positions.js';
 import { isRunning, tickRun } from './run.js';
-import { mountSettings } from './settings.js';
+import { applySettingsFocus, mountSettings } from './settings.js';
+import { jumpTo } from './ui.js';
 import { $, PAGES, hooks, POLL_MS, TITLES, destroyCharts, setHtml, setText, state } from './state.js';
 
 /* ---------- routing ---------- */
@@ -16,6 +20,8 @@ import { $, PAGES, hooks, POLL_MS, TITLES, destroyCharts, setHtml, setText, stat
 export function patchCurrent() {
   patchUpdated();
   setWorkerUI(state.status?.worker);
+  applyBadge();
+  patchBudgetChip();
   switch (state.page) {
     case 'dashboard':
       patchDashboard();
@@ -31,6 +37,9 @@ export function patchCurrent() {
     case 'logs':
       loadLogs();
       break;
+    case 'settings':
+      patchBudgetCard();
+      break;
     default:
   }
 }
@@ -39,7 +48,7 @@ function render() {
   destroyCharts();
   resetChartKey();
   navActive(state.page);
-  document.title = `${TITLES[state.page]} · tradingbot`;
+  applyBadge();
   switch (state.page) {
     case 'performance':
       mountPerformance();
@@ -58,9 +67,15 @@ function render() {
   }
 }
 
+/** `#settings/models` -> {page:'settings', sub:'models'}; unknown pages fold into the dashboard. */
+function parseHash() {
+  const [p, sub] = (window.location.hash || '#dashboard').replace('#', '').split('/');
+  const page = PAGES.includes(p) ? p : 'dashboard'; // retired pages (ai-desk, decisions, chat…) fold into the dashboard
+  return { page, sub: page === 'settings' && sub ? sub : null };
+}
 function routeFromHash() {
-  let page = (window.location.hash || '#dashboard').replace('#', '') || 'dashboard';
-  if (!PAGES.includes(page)) page = 'dashboard'; // retired pages (ai-desk, decisions, chat…) fold into the dashboard
+  const { page, sub } = parseHash();
+  state.settingsFocus = sub;
   return page;
 }
 
@@ -94,12 +109,25 @@ async function startApp() {
 async function boot() {
   hooks.patchCurrent = patchCurrent;
   bindChrome();
+  initMobile();
   window.addEventListener('hashchange', () => {
     if (state.locked) return; // the route is kept and restored after sign-in
+    const before = state.page;
     state.page = routeFromHash();
+    if (state.page === 'settings' && before === 'settings') return applySettingsFocus(); // same page: just scroll to the section
     render();
     $('view-root').focus({ preventScroll: true });
     window.scrollTo(0, 0);
+  });
+  // in-page jumps (toasts, run bar, summary): data-jump="element-id"; from another page go to the dashboard first
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('[data-jump]');
+    if (!a) return;
+    e.preventDefault();
+    const id = a.dataset.jump;
+    if (state.page === 'dashboard') return void jumpTo(id);
+    window.location.hash = '#dashboard';
+    setTimeout(() => jumpTo(id), 450);
   });
   initAuth({ onUnlock: startApp });
   const open = await gate(); // shows the sign-in screen (and stops here) when a login is required
@@ -115,6 +143,7 @@ async function boot() {
       if (el.dataset.exp) setText(el, leftText(el.dataset.exp));
     });
     if (isRunning()) tickRun();
+    tickProposals();
   }, 1000);
 }
 
