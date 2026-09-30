@@ -15,7 +15,7 @@ const { loginByPair, loginByIp, loginEmailDelay, signupGlobal, passwordBySession
 const { AttemptLimiter, DelayTracker } = await import('../server/auth/index.js');
 const { normalizeIp, clientKey, warnIfProxyMisconfigured } = await import('../server/middleware.js');
 const C = await import('../server/auth/crypto.js');
-const { isLoopback } = await import('../server/auth/policy.js');
+const { isLoopback, signupCode } = await import('../server/auth/policy.js');
 const { passwordRuleProblem, BLOCKLIST_SIZE } = await import('../public/js/password-rules.js');
 const L = await import('../public/js/auth-logic.js');
 
@@ -168,8 +168,9 @@ test('M1: production with no account and no ADMIN_TOKEN answers 503 setup_requir
     const r = await call(m, p, { body: m === 'GET' ? undefined : {} });
     assert.equal(r.status, 503, `${m} ${p}`);
     assert.equal(r.body.code, 'setup_required');
-    assert.match(r.body.error, /SIGNUP_CODE/); // SIGNUP_CODE unset too: says exactly which env var to set
-    assert.match(r.body.error, /Set the SIGNUP_CODE environment variable/);
+    assert.match(r.body.error, /SIGNUP_CODE/); // SIGNUP_CODE unset too: names the env var AND where the one-time code is
+    assert.match(r.body.error, /one-time setup code/);
+    assert.match(r.body.error, /Logs/);
   }
   assert.equal((await call('GET', '/health')).status, 200);
   const st = await call('GET', '/auth/status');
@@ -182,7 +183,7 @@ test('M1: production with no account and no ADMIN_TOKEN answers 503 setup_requir
   process.env.SIGNUP_CODE = 'a-long-random-setup-code';
   const withCode = await call('GET', '/status');
   assert.equal(withCode.status, 503);
-  assert.doesNotMatch(withCode.body.error, /Set the SIGNUP_CODE/);
+  assert.doesNotMatch(withCode.body.error, /one-time setup code/);
   // signup still needs the code, then everything opens normally (401 without a session, 200 with)
   assert.equal((await signup()).body.code, 'invalid_signup_code');
   const ok = await signup(OWNER, { code: 'a-long-random-setup-code' });
@@ -424,10 +425,12 @@ test('L6: code-less first-run signup from loopback also needs a localhost Host h
   const body = { email: OWNER, password: PW };
   const rebound = await rawRequest(`evil.example:${port}`, body);
   assert.equal(rebound.status, 403);
-  assert.equal(rebound.body.code, 'signup_disabled');
+  assert.equal(rebound.body.code, 'invalid_signup_code'); // not loopback -> must present the one-time boot code (a rebinding page cannot know it)
   assert.equal(usersRepo.count(), 0);
   const st = await realFetch(`${base}/api/auth/status`, { headers: {} });
-  assert.equal((await st.json()).signupOpen, true); // the real Host (127.0.0.1:port) is fine
+  const stBody = await st.json();
+  assert.equal(stBody.signupOpen, true); // the real Host (127.0.0.1:port) is fine
+  assert.equal(stBody.signupNeedsCode, false); // loopback + nothing configured: no code needed
   assert.equal((await rawRequest(`localhost:${port}`, body)).status, 200);
   usersRepo._reset();
   assert.equal((await rawRequest(`127.0.0.1:${port}`, body)).status, 200);

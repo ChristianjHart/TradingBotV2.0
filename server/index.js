@@ -11,6 +11,7 @@ import { warnIfProxyMisconfigured } from './middleware.js';
 import { hydrateFromSupabase } from './db/hydrate.js';
 import { supabaseEnabled } from './db/supabase.js';
 import { applyOwnerCredentials } from './auth/accounts.js';
+import { announceSetupCode } from './auth/policy.js';
 import { installProcessHandlers, installShutdownHandlers } from './lifecycle.js';
 
 installProcessHandlers();
@@ -75,5 +76,6 @@ app.listen(config.port, host, () => {
   warnIfProxyMisconfigured((message) => store.addLog({ level: 'warn', message }));
   hydrateFromSupabase()
     .then(() => applyOwnerCredentials())
+    .then(() => announceSetupCode())
     .finally(bootWorker);
 });
