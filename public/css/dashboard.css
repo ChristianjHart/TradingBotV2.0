@@ -1290,7 +1290,7 @@ html.modal-open { overflow: hidden; }
   .pill { font-size: 11px; padding: 3px 9px; }
   .badge { font-size: 11px; }
   .perf-stat .lbl, .stat .lbl, .perf-hero label, .perf-chart-title, .chip, .stat small, .lvl, .log-row .ts, .th-btn, .table th, .rtxt, .step-txt small, .fld-hint, .af-hint, .af-err, .fld-err, .keygrp-note { font-size: 12px; }
-  .lvl, .table th, .perf-stat .lbl, .stat .lbl { font-size: 11px; }
+  .lvl, .log-row .lvl, .table th, .perf-stat .lbl, .stat .lbl { font-size: 11px; }
   .perf-stat strong { font-size: 15px; }
   .stat strong { font-size: clamp(17px, 5.4vw, 20px); overflow-wrap: anywhere; }
   .stat { padding: 10px; min-width: 0; }
@@ -1555,3 +1555,9 @@ html.modal-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .topnav-right, .nav-links, .modal { transition: none !important; animation: none !important; }
 }
+
+.log-row .lvl { opacity: 1; }
+.log-row.error .msg { color: var(--red-text); }
+.log-row.warn .msg { color: #fb923c; }
+.log-row.error .lvl { color: var(--red-text); }
+.log-row.warn .lvl { color: #fb923c; }

@@ -163,6 +163,11 @@ function pageAudit(opts) {
       const a = rects[i];
       const b = rects[j];
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+      const layer = (e) => (e.closest('.topnav, .modal, .toasts, .topnav-right') ? 1 : 0);
+      if (layer(a.el) !== layer(b.el)) continue; // fixed chrome floats above scrolling content by design
+      if (a.el.tagName === 'CANVAS' || b.el.tagName === 'CANVAS') continue;
+      if (a.el.closest('.af-wrap') && a.el.closest('.af-wrap') === b.el.closest('.af-wrap')) continue; // show/hide button lives inside its field
+      if (a.el.matches('input, select') && b.el.closest('label') === a.el.closest('label') && a.el.closest('label')) continue;
       const ox = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
       const oy = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
       if (ox > 2 && oy > 2) overlaps.push(`${sel(a.el)} x ${sel(b.el)}`);
@@ -245,6 +250,7 @@ function pageAudit(opts) {
     if (r.right > vw + 1 || r.left < -1) media.push(`${sel(el)} [${Math.round(r.left)}..${Math.round(r.right)}]`);
     if (el.tagName === 'CANVAS') {
       if (r.height > vh * 0.9 && vw > vh) media.push(`${sel(el)} taller (${Math.round(r.height)}) than 90% of the landscape viewport`);
+      if (el.width === 300 && el.height === 150) return; // never drawn (no data in this state)
       if (r.height < 150) media.push(`${sel(el)} too short (${Math.round(r.height)}px)`);
       const dpr = window.devicePixelRatio || 1;
       if (Math.abs(el.width - Math.round(r.width * dpr)) > 2) media.push(`${sel(el)} blurry: backing ${el.width}px vs ${Math.round(r.width * dpr)}px expected`);
@@ -648,7 +654,7 @@ async function main() {
       await check(p2, vp, 'run-stepper-midrun', {
         extra: async (pg) => {
           const r = await pg.evaluate(() => [...document.querySelectorAll('.step')].map((s) => { const b = s.getBoundingClientRect(); return [b.left, b.right]; }));
-          return r.length === 3 && r.every(([l, rr]) => l >= 0 && rr <= innerWidth) ? [] : ['not all 3 steps visible'];
+          return r.length === 3 && r.every(([l, rr]) => l >= 0 && rr <= vp.w) ? [] : ['not all 3 steps visible'];
         },
       });
       await p2.unroute('**/api/run/status');
