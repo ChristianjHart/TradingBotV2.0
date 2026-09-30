@@ -786,7 +786,7 @@ async function main() {
       await p2.route('**/api/run/status', (r) => json(r, { running: true, stage: 'scanning', runId: 'r', startedAt: new Date(Date.now() - 42e3).toISOString(), finishedAt: null, error: null, picks: 0, opened: 0 }));
       await p2.goto('/#dashboard');
       await waitLoaded(p2);
-      await p2.waitForSelector('.stepper', { timeout: 8000 });
+      await p2.waitForSelector('.stepper', { state: 'attached', timeout: 8000 });
       await check(p2, vp, 'run-stepper-midrun', {
         extra: async (pg) => {
           const r = await pg.evaluate(() => [...document.querySelectorAll('.step')].map((s) => { const b = s.getBoundingClientRect(); return [b.left, b.right]; }));
@@ -797,11 +797,43 @@ async function main() {
       await p2.route('**/api/run/status', (r) => json(r, { running: false, stage: 'error', runId: 'r', startedAt: new Date(Date.now() - 42e3).toISOString(), finishedAt: new Date().toISOString(), error: 'OpenRouter request failed: 402 Payment Required — insufficient credits for model anthropic/claude-with-a-really-long-name-v3.5-sonnet-20251022 (' + 'x'.repeat(80) + ')', picks: 0, opened: 0 }));
       await p2.reload();
       await waitLoaded(p2);
-      await p2.waitForSelector('.stepper', { timeout: 8000 });
+      await p2.waitForSelector('.stepper', { state: 'attached', timeout: 8000 });
       await check(p2, vp, 'run-stepper-error');
       await p2.close();
     });
 
+
+    /* ---- phone dashboard: collapsible sections, short page (<=700px only) ---- */
+    if (vp.w <= 700) await step(vp, 'dashboard-collapsed', async () => {
+      const p2 = await newPage(ctx, vp, { expectErrors: true });
+      await applySafeArea(ctx, p2, vp);
+      await p2.addInitScript(() => { try { if (!sessionStorage.getItem('dsec-init')) { sessionStorage.setItem('dsec-init', '1'); localStorage.removeItem('tb_dash_sections'); } } catch { /* ignore */ } });
+      await stubProposals(p2);
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await p2.waitForSelector('.pcard', { timeout: 8000 });
+      await check(p2, vp, 'dashboard-collapsed', {
+        extra: async (pg) => {
+          const out = [];
+          const h = await pg.evaluate(() => document.documentElement.scrollHeight);
+          // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more
+          if (h > 3400) out.push(`collapsed dashboard is ${h}px tall (budget 3400 with extreme stub content)`);
+          const r = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].map((w) => [w.dataset.dsec, w.querySelector('[data-dsec-toggle]').getAttribute('aria-expanded'), w.querySelector('[data-dsec-toggle]').getBoundingClientRect().height]));
+          const open = r.filter((x) => x[1] === 'true').map((x) => x[0]);
+          if (open.join() !== 'pos') out.push(`expected only positions open, got ${open.join() || 'none'}`);
+          if (r.some((x) => x[2] < 44)) out.push('a section header is shorter than 44px');
+          // toggle budget open, reload, it stays open (remembered)
+          await pg.click('[data-dsec-toggle=budget]');
+          if (!(await pg.isVisible('#w-budget'))) out.push('budget body not visible after opening');
+          await pg.reload();
+          await waitLoaded(pg);
+          if ((await pg.getAttribute('[data-dsec-toggle=budget]', 'aria-expanded')) !== 'true') out.push('open state not remembered');
+          await pg.click('[data-dsec-toggle=budget]');
+          return out;
+        },
+      });
+      await p2.close();
+    });
 
     /* ---- proposals (stubbed: several cards incl. extremes) ---- */
     await step(vp, 'proposals', async () => {
