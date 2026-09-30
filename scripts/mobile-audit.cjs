@@ -790,7 +790,7 @@ async function main() {
       await check(p2, vp, 'run-stepper-midrun', {
         extra: async (pg) => {
           const r = await pg.evaluate(() => [...document.querySelectorAll('.step')].map((s) => { const b = s.getBoundingClientRect(); return [b.left, b.right]; }));
-          return r.length === 3 && r.every(([l, rr]) => l >= 0 && rr <= vp.w) ? [] : ['not all 3 steps visible'];
+          return r.length === 4 && r.every(([l, rr]) => l >= 0 && rr <= vp.w) ? [] : ['not all 4 steps visible'];
         },
       });
       await p2.unroute('**/api/run/status');
@@ -817,7 +817,7 @@ async function main() {
           const out = [];
           const h = await pg.evaluate(() => document.documentElement.scrollHeight);
           // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more
-          if (h > 3400) out.push(`collapsed dashboard is ${h}px tall (budget 3400 with extreme stub content)`);
+          if (h > 3600) out.push(`collapsed dashboard is ${h}px tall (budget 3600 with extreme stub content)`);
           const r = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].map((w) => [w.dataset.dsec, w.querySelector('[data-dsec-toggle]').getAttribute('aria-expanded'), w.querySelector('[data-dsec-toggle]').getBoundingClientRect().height]));
           const open = r.filter((x) => x[1] === 'true').map((x) => x[0]);
           if (open.join() !== 'pos') out.push(`expected only positions open, got ${open.join() || 'none'}`);
@@ -1029,6 +1029,117 @@ async function main() {
       await check(p2, vp, 'performance-approval-baselines');
       await scrollToEl(p2, '#perf-base');
       await check(p2, vp, 'performance-baselines');
+      await p2.close();
+    });
+
+
+    /* schedule + news & earnings: dashboard sections, settings cards, sheets (extreme stubbed data) */
+    await step(vp, 'schedule-news', async () => {
+      const p2 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p2, vp);
+      const longTxt = 'Very long unbroken summary text ' + 'supercalifragilistic'.repeat(6) + ' and more words that keep going about guidance, margins and demand. '.repeat(6);
+      const notes = Array.from({ length: 14 }, (_, i) => ({ symbol: i === 1 ? 'BERKSHIREHATHAWAY.B/USDT' : `SYM${i}`, runId: 'r1', at: new Date().toISOString(), sentiment: [0.9, -0.8, 0, 0.3, -0.3, null][i % 6], catalyst: longTxt.slice(0, 180), earningsInDays: i % 3 === 0 ? i % 2 : i % 3 === 1 ? null : 6, riskFlags: i % 2 ? ['halt', 'legal', 'guidance_risk', 'low_confidence', 'macro'] : [], summary: longTxt, sources: [{ title: 'Headline ' + 'long '.repeat(30), url: 'https://news.example.com/a/very/long/path/' + 'x'.repeat(120), publishedAt: new Date().toISOString() }, { title: '<b>evil</b>', url: 'javascript:alert(1)', publishedAt: null }, { title: 'Third', url: 'http://example.org/3' }, { title: 'Fourth', url: 'https://example.org/4' }] }));
+      await p2.route('**/api/research/latest', (r) => json(r, { notes, count: notes.length }));
+      const props = mkProposals(3).map((x, i) => ({ ...x, earningsInDays: i === 0 ? 1 : null, riskFlags: i === 1 ? ['halt', 'rumor', 'offering'] : [], notes: i === 0 ? longTxt.slice(0, 300) : null }));
+      const hist = [...mkHistory(), { ...mkProposals(3)[0], id: 'prop_ar1', status: 'rejected', decidedBy: 'system', rejectReason: 'earnings blackout', earningsInDays: 1, riskFlags: ['earnings_imminent'], decidedAt: new Date().toISOString() }, { ...mkProposals(3)[2], id: 'prop_ar2', status: 'rejected', decidedBy: 'system', rejectReason: 'news risk flag: legal', riskFlags: ['legal'], decidedAt: new Date().toISOString() }];
+      await stubProposals(p2, props, hist);
+      await patchStatus(p2, (b) => { b.news = { enabled: true, headlinesAvailable: true, earningsAvailable: false, mock: true, model: LONG_MODEL }; });
+      await p2.route('**/api/ai/summary', (r) => json(r, { runId: 'r1', at: new Date().toISOString(), picks: 30, scannerSource: 'ai', traderSource: 'ai', proposalCount: 3, proposals: [], news: { status: 'partial', reason: 'No Finnhub key: earnings dates unknown', symbols: 20, headlines: 60, earningsKnown: 0, notes: 20, demo: true } }));
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await check(p2, vp, 'news-sched-collapsed');
+      if (vp.w <= 700) await p2.evaluate(() => document.querySelectorAll('#dsec-news.is-collapsed [data-dsec-toggle], #dsec-sched.is-collapsed [data-dsec-toggle], #dsec-sum.is-collapsed [data-dsec-toggle]').forEach((b) => b.click()));
+      await p2.waitForTimeout(300);
+      await scrollToEl(p2, '#dsec-news');
+      await check(p2, vp, 'news-section');
+      await p2.evaluate(() => document.querySelector('#news-more')?.click());
+      await p2.evaluate(() => document.querySelector('[data-nf="flagged"]')?.click());
+      await p2.waitForTimeout(200);
+      await check(p2, vp, 'news-section-flagged-all');
+      await scrollToEl(p2, '#dsec-sched');
+      await check(p2, vp, 'schedule-widget');
+      await scrollToEl(p2, '#sec-proposals');
+      await check(p2, vp, 'proposal-cards-news');
+      await p2.evaluate(() => document.getElementById('ptab-history').click());
+      await p2.waitForTimeout(700);
+      await scrollToEl(p2, '#prop-history');
+      await check(p2, vp, 'history-auto-rejected');
+      // run stepper with the news stage + news line
+      await p2.route('**/api/run/status', (r) => json(r, { ...RUN_BASE, running: true, stage: 'news', startedAt: new Date(Date.now() - 20e3).toISOString(), finishedAt: null, trigger: { type: 'schedule', plan: 'A', slot: 'x', reason: '' } }));
+      await p2.evaluate(async () => { const d = await import('/js/run.js'); d.hydrateRun(); });
+      await p2.waitForTimeout(800);
+      await scrollToEl(p2, '#run-bar');
+      await check(p2, vp, 'run-stage-news');
+      await p2.unroute('**/api/run/status');
+      await p2.route('**/api/run/status', (r) => json(r, { ...RUN_BASE, stage: 'done', proposals: 2, picks: 30, news: { status: 'skipped', reason: 'No Alpaca credentials for headlines', symbols: 0, headlines: 0, earningsKnown: 0 }, trigger: { type: 'event', reason: 'SPY -1.4%' } }));
+      await p2.evaluate(async () => { const d = await import('/js/state.js'); const a = await fetch('/api/run/status').then((x) => x.json()); d.state.run = a; const r = await import('/js/run.js'); r.patchRunBar(); });
+      await scrollToEl(p2, '#run-bar');
+      await check(p2, vp, 'run-done-news-skipped');
+      await p2.close();
+    });
+
+    await step(vp, 'schedule-settings', async () => {
+      const p2 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p2, vp);
+      const plans = ['A', 'B', 'C', 'D'].map((pl, i) => ({ plan: pl, label: `Plan ${pl}`, runsPerMonth: 21 * (i + 1), eventRunsAssumed: pl === 'C' ? 4 : 0, estCostPerRunUsd: i === 1 ? null : 0.4, basis: i === 1 ? 'unknown' : 'estimated', projectedMonthlyUsd: i === 1 ? null : 8.4 * (i + 1) * 1.6, pctOfBudget: i === 1 ? null : 42 * (i + 1) * 1.6, fitsBudget: i === 1 ? null : i < 2, note: 'Estimate from model prices and default token sizes. ' + 'x'.repeat(150) }));
+      const slots = [{ id: 's1', timeEt: '09:00', timeUtc: '13:00', scope: 'stocks', status: 'fired' }, { id: 's2', timeEt: '12:30', timeUtc: '16:30', scope: 'all', status: 'skipped', reason: 'budget_warn_event_dropped' }, { id: 's3', timeEt: '16:15', timeUtc: '20:15', scope: 'crypto', status: 'missed', reason: 'older_than_grace' }, { id: 's4', timeEt: '21:00', timeUtc: '01:00', scope: 'crypto', status: 'upcoming' }];
+      const sched = { enabled: true, plan: 'custom', tz: 'America/New_York', custom: [{ time: '09:00', days: 'weekdays', scope: 'stocks' }, { time: '13:30', days: 'daily', scope: 'all' }], cryptoRuns: ['09:00', '21:00'], slotsToday: slots, nextRunAt: new Date(Date.now() + 36e5).toISOString(), lastRuns: ['schedule', 'event', 'test', 'manual'].map((t, i) => ({ at: new Date(Date.now() - i * 36e5).toISOString(), trigger: { type: t, plan: 'A', slot: null, reason: t === 'event' ? 'SPY moved -1.4% in 30 minutes ' + 'x'.repeat(60) : '' }, status: i === 1 ? 'skipped' : 'ok', reason: i === 1 ? 'insufficient_budget' : undefined, costUsd: 0.0123 * i, proposals: i })), eventTriggers: { enabled: true, spyMovePct: 1, btcMovePct: 2.5, shortlistMovePct: 3, minMinutesBetweenEventRuns: 120, maxEventRunsPerDay: 2, active: true, firedToday: 1 } };
+      await p2.route('**/api/schedule', (r) => json(r, sched));
+      await p2.route('**/api/schedule/forecast*', (r) => json(r, { current: 'custom', enabled: true, capUsd: 20, estCostPerRunUsd: null, basis: 'unknown', newsIncluded: true, plans }));
+      await p2.route('**/api/schedule/experiments', (r) => json(r, { minSample: { runs: 10, scoredProposals: 10 }, netEdgeDefinition: 'Net edge = realized P&L - 0.5 x max drawdown + avoided loss', plans: [{ plan: 'none', runs: 3, avgCostUsd: 0.2, proposalsPerRun: 2, approvalRate: 0.5, netEdgeContribution: null, edgePerDollar: null, sampleSize: 3, scoredProposals: 2, minSampleNote: 'Needs 10 runs and 10 scored proposals before edge per dollar is shown.', byTrigger: [] }, { plan: 'B', runs: 14, avgCostUsd: 0.12, proposalsPerRun: 1.5, approvalRate: 0.42, netEdgeContribution: 30, edgePerDollar: 17.8, sampleSize: 14, scoredProposals: 20, byTrigger: [] }] }));
+      await p2.route('**/api/schedule/test-fire', (r) => json(r, { started: false, error: 'budget', code: 'insufficient_budget' }, 409));
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await go(p2, 'settings/schedule');
+      await p2.waitForSelector('#sw-sched', { timeout: 8000 });
+      await p2.waitForTimeout(500);
+      await scrollToEl(p2, '#sec-schedule');
+      await check(p2, vp, 'settings-schedule-plans');
+      await scrollToEl(p2, '#f-custom');
+      await check(p2, vp, 'settings-schedule-custom');
+      await scrollToEl(p2, '#f-event');
+      await p2.fill('#ev-spy', '99');
+      await p2.evaluate(() => document.querySelector('#f-event button[type=submit]').click());
+      await p2.waitForTimeout(250);
+      await check(p2, vp, 'settings-schedule-event-errors');
+      await scrollToEl(p2, '#sec-sched-status');
+      await check(p2, vp, 'settings-schedule-status');
+      await p2.evaluate(() => { document.getElementById('exp-det').open = true; });
+      await scrollToEl(p2, '#exp-det');
+      await check(p2, vp, 'settings-schedule-experiments');
+      await p2.evaluate(() => document.getElementById('btn-testfire').click());
+      await p2.waitForSelector('.modal');
+      await check(p2, vp, 'testfire-confirm', { modalOpen: true });
+      await p2.evaluate(() => document.querySelector('.modal [data-act="ok"]').click());
+      await p2.waitForTimeout(500);
+      await scrollToEl(p2, '#tf-err');
+      await check(p2, vp, 'testfire-409');
+      await p2.close();
+    });
+
+    await step(vp, 'news-settings-finnhub', async () => {
+      const p2 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p2, vp);
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await go(p2, 'settings/news');
+      await p2.waitForSelector('#f-news');
+      await p2.waitForTimeout(800);
+      await scrollToEl(p2, '#sec-news');
+      await check(p2, vp, 'settings-news');
+      await p2.fill('#ns-max', '99');
+      await p2.evaluate(() => document.querySelector('#f-news button[type=submit]').click());
+      await p2.waitForTimeout(250);
+      await check(p2, vp, 'settings-news-errors');
+      await p2.evaluate(() => document.getElementById('sw-news-earn').click());
+      await p2.waitForSelector('.modal');
+      await check(p2, vp, 'earnings-trades-confirm', { modalOpen: true });
+      await p2.evaluate(() => document.querySelector('.modal [data-act="cancel"]').click());
+      await p2.waitForTimeout(250);
+      await go(p2, 'settings/account');
+      await p2.waitForSelector('.keygrp[data-kind="finnhub"]', { timeout: 8000 }).catch(() => {});
+      await scrollToEl(p2, '.keygrp[data-kind="finnhub"]');
+      await check(p2, vp, 'settings-finnhub-key');
       await p2.close();
     });
 

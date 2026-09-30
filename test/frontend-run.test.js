@@ -17,7 +17,7 @@ test('stepperState: idle / missing run is hidden', () => {
 test('stepperState: resumes mid-run at the scanning stage with live elapsed', () => {
   const run = { running: true, stage: 'scanning', startedAt: new Date(T0).toISOString() };
   const v = stepperState(run, T0 + 95_000);
-  assert.deepEqual(states(v), ['done', 'active', 'pending']);
+  assert.deepEqual(states(v), ['done', 'active', 'pending', 'pending']);
   assert.equal(v.kind, 'running');
   assert.equal(v.elapsedMs, 95_000);
   assert.equal(v.steps.length, STEPS.length);
@@ -26,15 +26,15 @@ test('stepperState: resumes mid-run at the scanning stage with live elapsed', ()
 test('stepperState: done marks all steps done and freezes elapsed at finishedAt', () => {
   const run = { running: false, stage: 'done', startedAt: new Date(T0).toISOString(), finishedAt: new Date(T0 + 60_000).toISOString() };
   const v = stepperState(run, T0 + 999_999);
-  assert.deepEqual(states(v), ['done', 'done', 'done']);
+  assert.deepEqual(states(v), ['done', 'done', 'done', 'done']);
   assert.equal(v.kind, 'done');
   assert.equal(v.elapsedMs, 60_000);
 });
 
 test('stepperState: error places the failure on the last running stage', () => {
   const run = { running: false, stage: 'error', startedAt: new Date(T0).toISOString(), finishedAt: new Date(T0 + 1000).toISOString() };
-  assert.deepEqual(states(stepperState(run, T0, 'scanning')), ['done', 'error', 'pending']);
-  assert.deepEqual(states(stepperState(run, T0)), ['error', 'pending', 'pending']);
+  assert.deepEqual(states(stepperState(run, T0, 'scanning')), ['done', 'error', 'pending', 'pending']);
+  assert.deepEqual(states(stepperState(run, T0)), ['error', 'pending', 'pending', 'pending']);
   assert.equal(stepperState(run, T0, 'trading').kind, 'error');
 });
 

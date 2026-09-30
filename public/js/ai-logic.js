@@ -1,3 +1,4 @@
+import { proposalNews } from './news-logic.js';
 /* Pure, DOM-free helpers for the propose-and-approve flow: run problems, approval errors, countdowns, proposal card
    view-models, shadow "what-if" language, budget levels. Importable from node:test. Keep browser globals out of this file.
    Everything returned as text may contain server/LLM strings: callers must escape before putting it in HTML. */
@@ -213,6 +214,7 @@ export function proposalView(p, now = Date.now()) {
     expired: left.level === 'expired',
     status: p.status || 'pending',
     createdAt: p.createdAt || '',
+    news: proposalNews(p),
   };
 }
 

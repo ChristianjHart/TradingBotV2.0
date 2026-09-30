@@ -4,6 +4,8 @@ import { hooks, $, nowMs, setHtml, setText, state } from './state.js';
 import { STEPS, stepperState } from './run-logic.js';
 import { aiBlocked, runDoneText, runProblem } from './ai-logic.js';
 import { toast } from './ui.js';
+import { newsRunStatus } from './news-logic.js';
+import { triggerBadge } from './schedule-logic.js';
 
 export { STEPS };
 
@@ -40,8 +42,8 @@ export function runBarHtml() {
   if (!v.visible && !pr) return '';
   const steps = v.steps.map((s, i) => {
     const st = s.state;
-    const icon = { done: '✓', error: '!', active: '', pending: String(i + 1) }[st];
-    const sr = { done: 'complete', error: 'failed', active: 'in progress', pending: 'pending' }[st];
+    const icon = { done: '✓', warn: '!', error: '!', active: '', pending: String(i + 1) }[st];
+    const sr = { done: 'complete', warn: `finished with a problem: ${esc(state.run?.news?.status || 'skipped')}`, error: 'failed', active: 'in progress', pending: 'pending' }[st];
     return `<li class="step step-${st}" ${st === 'active' ? 'aria-current="step"' : ''}>
       <span class="step-dot" aria-hidden="true">${st === 'active' ? '<span class="spin"></span>' : icon}</span>
       <span class="step-txt"><strong>${s.label}</strong><small>${st === 'active' ? esc(s.hint) : ''}<span class="sr-only"> ${sr}</span></small></span></li>`;
@@ -58,7 +60,22 @@ export function runBarHtml() {
           ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded). RUN is disabled until it finishes.</span>'
           : '<span class="dim">Running…</span>';
   return `<div class="run-bar run-${v.kind}" role="group" aria-label="Run progress"><ol class="stepper">${steps}</ol>
-    <div class="run-meta">${tail} <span class="mono dim" id="run-elapsed"></span></div></div>${pr ? problemHtml(pr) : ''}`;
+    <div class="run-meta">${triggerHtml(r)}${tail} <span class="mono dim" id="run-elapsed"></span></div>${newsLineHtml(r)}</div>${pr ? problemHtml(pr) : ''}`;
+}
+
+/** One obvious line about the news step (shown once the run is past it). Text comes from the server: escaped. */
+export function newsLineHtml(run) {
+  if (!run || !['trading', 'done'].includes(run.stage)) return '';
+  const ns = newsRunStatus(run.news);
+  if (!ns) return '';
+  return `<div class="news-line news-${ns.tone}" role="status"><strong><span aria-hidden="true">${{ ok: '✓', warn: '!', bad: '✕' }[ns.tone] || ''}</span> ${esc(ns.title)}</strong> <span>${esc(ns.text)}</span>${ns.demo ? ' <span class="badge-demo">DEMO DATA</span>' : ''}${ns.link ? ` <a class="prop-link" href="${esc(ns.link.href)}">${esc(ns.link.label)}</a>` : ''}</div>`;
+}
+
+function triggerHtml(run) {
+  const t = run?.trigger;
+  if (!t || t.type === 'manual') return '';
+  const b = triggerBadge(t);
+  return `<span class="chip chip-${b.tone}" title="${esc(b.detail)}">${esc(b.label)} run</span> `;
 }
 
 export function gateHtml() {

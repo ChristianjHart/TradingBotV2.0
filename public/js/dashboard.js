@@ -8,6 +8,9 @@ import { onRunClick, patchRunBar, startRun } from './run.js';
 import { bindSections, applySections, patchSectionSummaries, sectionHeadHtml } from './sections.js';
 import { budgetView } from './ai-logic.js';
 import { currentBudget } from './budget.js';
+import { bindNews, newsSectionSummary, patchNews } from './news.js';
+import { patchScheduleWidget, scheduleSectionSummary } from './schedule.js';
+import { newsRunStatus } from './news-logic.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
 /* ---------- dashboard widgets ---------- */
@@ -34,9 +37,16 @@ export function summaryHtml() {
     <div class="sum-status">${who}${status}</div>
     <div class="dim sum-when">${esc(new Date(sm.at).toLocaleString())} · scanner ${esc(sm.scannerModel || sm.scannerSource)} · trader ${esc(sm.traderModel || sm.traderSource)}</div>
     ${sm.note ? `<p class="sum-note">${esc(sm.note)}</p>` : ''}
+    ${newsLineSummary(sm.news)}
     ${props.length ? `<ul class="sum-list">${props.map((t) => `<li><span class="sym">${esc(t.symbol)}</span> <span class="pill pill-${esc(t.side)}">${esc(t.side)}</span>
         <span class="mono dim">${fmtMoney(t.allocationUsd ?? t.allocation, 0)}</span> <span class="sum-r clamp">— ${esc(t.reason)}</span></li>`).join('')}</ul>` : ''}
     ${(sm.rejected || []).length ? `<div class="dim sum-rej">Passed on: ${sm.rejected.map(esc).join(', ')}</div>` : ''}`;
+}
+
+function newsLineSummary(news) {
+  const ns = newsRunStatus(news);
+  if (!ns) return '';
+  return `<div class="news-line news-${ns.tone}"><strong><span aria-hidden="true">${{ ok: '✓', warn: '!', bad: '✕' }[ns.tone]}</span> ${esc(ns.title)}</strong> <span>${esc(ns.text)}</span>${ns.link ? ` <a class="prop-link" href="${esc(ns.link.href)}">${esc(ns.link.label)}</a>` : ''}</div>`;
 }
 
 export function allocationHtml() {
@@ -132,6 +142,10 @@ export function mountDashboard() {
     <div id="run-gate"></div>
     <div id="run-bar" role="status" aria-live="polite"></div>
     ${proposalsShellHtml()}
+    <div class="grid grid-news">
+    <section class="widget news-card" aria-labelledby="h-news" id="dsec-news" data-dsec="news">${sectionHeadHtml('news')}<h2 class="widget-title" id="h-news"><span>NEWS &amp; EARNINGS</span><span class="dim" id="news-sub"></span></h2><div id="w-news"></div></section>
+    <section class="widget sched-widget" aria-labelledby="h-sched-w" id="dsec-sched" data-dsec="sched">${sectionHeadHtml('sched')}<h2 class="widget-title" id="h-sched-w"><span>SCHEDULE</span><a class="dim" href="#settings/schedule">Manage →</a></h2><div id="w-sched"></div></section>
+    </div>
     <div class="grid grid-top">
       <section class="widget ai-summary" aria-labelledby="h-sum" id="dsec-sum" data-dsec="sum">${sectionHeadHtml('sum')}<h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
       <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w" data-dsec="budget">${sectionHeadHtml('budget')}<h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
@@ -175,6 +189,7 @@ export function mountDashboard() {
   $('run-gate').addEventListener('click', onRunClick);
   setRerun(startRun);
   bindProposals();
+  bindNews();
   const pw = $('pos-open').parentElement;
   pw.addEventListener('click', posClick);
   pw.addEventListener('change', posChange);
@@ -203,6 +218,8 @@ export function patchDashboard() {
   setHtml($('w-alloc'), allocationHtml());
   patchBudgetWidget();
   patchProposals();
+  patchNews();
+  patchScheduleWidget();
   setHtml($('w-acc'), accuracyHtml());
   setHtml($('sys-strip'), sysStripHtml());
   const st = state.picks;
@@ -232,6 +249,8 @@ function sectionData() {
   return {
     pos: { openCount: state.loaded ? (state.positions?.open || []).length : null, unrealized: Number(acct?.unrealizedPnl) },
     sum: { proposalCount: state.summary?.at ? state.summary.proposalCount ?? state.summary.proposals?.length ?? 0 : null },
+    news: { text: newsSectionSummary() },
+    sched: { text: scheduleSectionSummary() },
     budget: { spentText: bv?.spentText, capText: bv?.capText },
     picks: { picksCount: state.loaded ? state.picks?.picks?.length || 0 : null },
     perf: { netEdge: p?.netEdge == null ? NaN : Number(p.netEdge), closed },

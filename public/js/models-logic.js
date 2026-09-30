@@ -7,7 +7,7 @@ export const PAGE_SIZE = 25;
 export const BOTS = [
   { id: 'scanner', label: 'Scanner', field: 'scannerModel', hint: 'ranks the top picks' },
   { id: 'trader', label: 'Trader', field: 'traderModel', hint: 'proposes the trades' },
-  { id: 'news', label: 'News', field: 'newsModel', hint: 'coming with the news bot', disabled: true },
+  { id: 'news', label: 'News', field: 'newsModel', hint: 'headlines and earnings notes' },
 ];
 
 export const FREE_NOTES = [

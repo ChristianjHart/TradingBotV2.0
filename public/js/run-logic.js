@@ -3,6 +3,7 @@
 export const STEPS = [
   { id: 'fetching', label: 'Fetch market data', hint: 'downloading bars' },
   { id: 'scanning', label: 'Scanner bot', hint: 'AI can take 1–3 min' },
+  { id: 'news', label: 'News & earnings', hint: 'headlines and earnings dates' },
   { id: 'trading', label: 'Trader bot', hint: 'sizing & simulating trades' },
 ];
 
@@ -23,6 +24,10 @@ export function stepperState(run, now, lastRunningStage = null) {
     else if (idx >= 0) st = i < idx ? 'done' : i === idx ? 'active' : 'pending';
     return { ...s, state: st };
   });
+  // the news step is optional context: when the run finished but it was skipped / partial / failed, say so on the step itself
+  const nst = run.news?.status;
+  const ns = steps.find((x) => x.id === 'news');
+  if (ns && ns.state === 'done' && ['skipped', 'partial', 'error'].includes(nst)) ns.state = 'warn';
   const kind = run.stage === 'error' ? 'error' : run.stage === 'blocked' ? 'blocked' : run.stage === 'done' ? 'done' : 'running';
   const start = new Date(run.startedAt).getTime();
   const end = run.running ? now : new Date(run.finishedAt || now).getTime();

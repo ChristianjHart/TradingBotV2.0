@@ -5,10 +5,12 @@ import { budgetCardHtml, patchBudgetCard, wireBudgetCard } from './budget.js';
 import { authClick } from './chrome.js';
 import { refresh } from './data.js';
 import { mountModels } from './models.js';
+import { newsCardHtml, wireNewsCard } from './news.js';
+import { mountSchedule } from './schedule.js';
 import { $, hooks, root, state } from './state.js';
 import { confirmDialog, toast } from './ui.js';
 
-const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge' };
+const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge', schedule: 'sched-root', news: 'sec-news' };
 
 /** Scroll to the section named by `#settings/<section>` (once the page has been mounted). */
 export function applySettingsFocus() {
@@ -148,6 +150,7 @@ export function mountSettings() {
   root.innerHTML = `<div class="page">
     <div class="notice">Trading is permanently disabled in this build. Alpaca is used for market data only; all positions are simulated.</div>
     <div class="settings-grid">${budgetCardHtml()}${autoCardHtml(s)}</div>
+    <div class="sched-wrap" id="sched-root"></div>
     <div class="models-wrap" id="models-root"></div>
     <div class="settings-grid account-grid">
     <section class="widget" aria-labelledby="h-set"><h2 class="widget-title" id="h-set">SETTINGS</h2>
@@ -168,10 +171,12 @@ export function mountSettings() {
       </dl>
       ${state.auth.required && state.auth.mode !== 'session' ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
     </section></div>
-    ${edgeCardHtml(s)}
+    <div class="settings-grid">${newsCardHtml(s)}${edgeCardHtml(s)}</div>
     <div class="settings-grid account-grid" id="account-root" aria-live="polite"></div></div>`;
   if (state.auth.mode !== 'token') mountAccount($('account-root'));
+  mountSchedule($('sched-root')).then(applySettingsFocus);
   mountModels($('models-root')).then(applySettingsFocus);
+  wireNewsCard();
   wireBudgetCard(root);
   wireAuto();
   wireEdge();

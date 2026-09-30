@@ -5,6 +5,7 @@ import { $, empty, hooks, setHtml, setText, skeleton, state, TITLES } from './st
 import { aiBlocked } from './ai-logic.js';
 import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
+import { autoRejectText } from './news-logic.js';
 
 /* ---------- selectors over state ---------- */
 
@@ -52,6 +53,12 @@ function msgHtml(msg) {
   return `<div class="pc-msg pc-msg-${esc(msg.tone || 'warn')}"><div class="pc-msg-t"><strong>${esc(msg.title)}</strong><button type="button" class="pc-msg-x" data-act="dismiss" aria-label="Dismiss message"><span aria-hidden="true">×</span></button></div><p>${esc(msg.message)}</p>${acts ? `<div class="pc-msg-a">${acts}</div>` : ''}</div>`;
 }
 
+function newsCtxHtml(n) {
+  if (!n || (!n.earnings && !n.flags.length && !n.note)) return '';
+  const chips = [n.earnings ? `<span class="chip chip-${n.earnings.tone}">${n.earnings.soon ? '⚠ ' : ''}${esc(n.earnings.text)}</span>` : '', ...n.flags.map((f) => `<span class="chip chip-${f.blocking ? 'bad' : 'warn'}" title="${esc(f.help)}">${f.blocking ? '⛔ ' : '⚑ '}${esc(f.label)}</span>`)].filter(Boolean);
+  return `<div class="pc-news" aria-label="News and earnings">${chips.length ? `<div class="n-flags">${chips.join('')}</div>` : ''}${n.note ? `<div class="clamp pc-news-note"><span class="lbl">NEWS</span> ${esc(n.note)}</div>` : ''}</div>`;
+}
+
 const spin = '<span class="spin" aria-hidden="true"></span>';
 
 export function cardHtml(v, busy, msg) {
@@ -73,6 +80,7 @@ export function cardHtml(v, busy, msg) {
     <dl class="pc-prices">${priceCell('Entry', v.entry, '')}${priceCell('Stop', v.stop, v.stopPct != null ? `-${v.stopPct.toFixed(1)}%` : '', 'pc-stop')}${priceCell('Target', v.target, v.targetPct != null ? `+${v.targetPct.toFixed(1)}%${v.rr != null ? ` · ${v.rr.toFixed(1)}R` : ''}` : '', 'pc-tgt')}</dl>
     <div class="rbar pc-bar" role="img" aria-label="${esc(barLabel)}" style="background:${bar}"><span class="rentry" style="left:${v.entryAt * 100}%"></span></div>
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
+    ${newsCtxHtml(v.news)}
     ${riskHtml(v)}
     <p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>
     <div class="pc-msgs" role="status" aria-live="polite">${msgHtml(msg)}</div>
@@ -85,7 +93,7 @@ export function cardHtml(v, busy, msg) {
 
 /** Signature of everything a card shows except the ticking countdown text, so live polls only touch cards that changed. */
 function sigOf(v, busy, msg) {
-  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status]);
+  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status]);
 }
 
 /** Keyed reconcile: keep untouched card nodes (scroll, expanded text, focus) and replace only the changed ones. */
@@ -456,6 +464,8 @@ function historyCard(p) {
     <div class="hc-line"><span class="mono">${v.allocationUsd == null ? '—' : fmtMoney(v.allocationUsd, 0)}</span><span class="dim"> · ${esc(fmtDateTime(when))}</span></div>
     <div class="hc-levels mono dim">entry ${v.entry == null ? '—' : fmtMoney(v.entry)} · stop ${v.stop == null ? '—' : fmtMoney(v.stop)} · target ${v.target == null ? '—' : fmtMoney(v.target)}</div>
     <div class="hc-out">${esc(outcomeText(p))}</div>
+    ${autoRejectText(p) ? `<div class="auto-rej" role="note"><strong><span aria-hidden="true">⛔</span> ${esc(autoRejectText(p))}</strong></div>` : ''}
+    ${newsCtxHtml(v.news)}
     ${sv.tone !== 'none' ? `<div class="whatif whatif-${sv.tone}"><span class="whatif-h">${sv.icon ? `<span aria-hidden="true">${esc(sv.icon)}</span> ` : ''}<strong>${esc(sv.label)}</strong>${sv.amountText ? ` <span class="mono">${esc(sv.amountText)}</span>` : ''}</span>${sv.detail ? `<small>${esc(sv.detail)}</small>` : ''}</div>` : ''}
     ${posLine(p)}
     ${p.reason ? `<div class="clamp">${esc(p.reason)}</div>` : ''}
