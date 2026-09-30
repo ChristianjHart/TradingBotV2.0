@@ -4,6 +4,9 @@ import { createApp } from './app.js';
 import { store } from './db/store.js';
 import { startAiRun } from './services/aiRun.js';
 import { scorePicks } from './services/pickScoring.js';
+import { scoreShadows } from './services/shadow.js';
+import { expireProposals } from './services/proposals.js';
+import { mockLlmEnabled } from './services/mockLlm.js';
 import { alpaca } from './services/alpaca.js';
 import { monitorPositions } from './services/positions.js';
 import { guarded, scheduledRunSkipReason } from './services/jobs.js';
@@ -36,6 +39,14 @@ if (!config.appSecret) {
   if (near.length) console.warn(`[security] variables with similar but unrecognised names (ignored): ${near.join(', ')} — expected exactly ${exact.join(', ')}`);
 }
 
+if (config.ai.mockLlmRequested) {
+  if (mockLlmEnabled()) {
+    const msg = 'MOCK_LLM is ON: the AI is replaced by a canned test fixture; every result is labelled DEMO DATA. Never use this for real decisions.';
+    console.warn(`\n[dev] WARNING: ${msg}\n`);
+    store.addLog({ level: 'warn', message: msg });
+  } // else: mockLlmEnabled() already logged the loud production refusal
+}
+
 const app = createApp();
 
 function workerAlive() {
@@ -56,6 +67,12 @@ cron.schedule('*/5 * * * *', guarded('monitor', monitorPositions));
 
 // Score scanner picks whose horizon has passed.
 cron.schedule('*/15 * * * *', guarded('score', scorePicks));
+
+// Counterfactual (shadow) scores for decided proposals whose horizon has passed.
+cron.schedule('*/15 * * * *', guarded('shadow', scoreShadows));
+
+// Pending proposals expire after their TTL (default 6h).
+cron.schedule('*/5 * * * *', guarded('proposals', () => expireProposals()));
 
 // Scheduled AI runs cost OpenRouter credits, so they are opt-in (settings.autoRun).
 const minutes = Math.max(5, config.scanIntervalMinutes);

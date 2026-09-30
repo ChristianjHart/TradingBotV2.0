@@ -3,7 +3,11 @@ import { store } from '../db/store.js';
 import { alpaca } from '../services/alpaca.js';
 import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
 import { supabaseEnabled } from '../db/supabase.js';
-import { startAiRun, runState } from '../services/aiRun.js';
+import { startAiRun, runState, aiStatus } from '../services/aiRun.js';
+import { mockLlmEnabled } from '../services/mockLlm.js';
+import { budgetStatus, budgetCompact, budgetCapUsd, priceOf, tokenProfile, costFromTokens } from '../services/spend.js';
+import { getCatalog, filterModels, FREE_MODEL_NOTES } from '../services/catalog.js';
+import { listProposals, approveProposal, rejectProposal, approveAll, ProposalError, STATUSES } from '../services/proposals.js';
 import { listPositions, closeManually, closeAll } from '../services/positions.js';
 import { computePerformance } from '../services/performance.js';
 import { pickStats } from '../services/picks.js';
@@ -51,6 +55,7 @@ router.get('/health', (_req, res) => {
     supabaseConfigured: supabaseEnabled,
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),
+    mockLlm: mockLlmEnabled(), // true = MOCK_LLM test fixture active: everything the AI produces is DEMO DATA
   });
 });
 
@@ -87,10 +92,87 @@ router.get('/performance', (_req, res) => {
       positions: store.getPositions(),
       snapshots: store.getEquity(),
       pickRecords: store.getPickScores(),
+      proposals: store.getProposals(),
+      settings: store.getSettings(),
       startingEquity: config.paperEquity,
     }),
   );
 });
+
+// ---- budget + model catalog ----
+router.get('/budget', (_req, res) => res.json(budgetStatus()));
+
+const truthy = (v) => /^(1|true|yes)$/i.test(String(v ?? ''));
+const BOT_MODEL = { scanner: () => config.openrouter.scannerModel, trader: () => config.openrouter.traderModel, news: () => config.openrouter.newsModel };
+const MODEL_ID = /^[\w.\-:/]{1,100}$/;
+
+router.get('/models', asyncHandler(async (req, res) => {
+  try {
+    const c = await getCatalog();
+    const models = filterModels(c.models, { free: truthy(req.query.free), q: req.query.q, maxPrice: req.query.maxPrice, limit: Number(req.query.limit) });
+    res.json({
+      models,
+      count: models.length,
+      total: c.models.length,
+      fetchedAt: new Date(c.fetchedAt).toISOString(),
+      stale: c.stale,
+      ...(c.error ? { error: c.error } : {}),
+      selected: { scanner: BOT_MODEL.scanner(), trader: BOT_MODEL.trader(), news: BOT_MODEL.news() },
+      notes: FREE_MODEL_NOTES,
+    });
+  } catch (err) {
+    res.status(502).json({ error: `model catalog unavailable: ${err.message}`, code: 'catalog_unavailable' });
+  }
+}));
+
+router.get('/models/estimate', asyncHandler(async (req, res) => {
+  const bot = String(req.query.bot ?? '');
+  if (!Object.hasOwn(BOT_MODEL, bot)) return res.status(400).json({ error: "bot must be 'scanner', 'trader' or 'news'" });
+  const model = req.query.model === undefined ? BOT_MODEL[bot]() : String(req.query.model);
+  if (!MODEL_ID.test(model)) return res.status(400).json({ error: 'invalid model id' });
+  await getCatalog().catch(() => null); // best effort; cached
+  const price = priceOf(model);
+  const prof = tokenProfile(bot);
+  const est = price ? costFromTokens(price, prof.prompt, prof.completion) : null;
+  const cap = budgetCapUsd();
+  const remaining = budgetStatus().remainingUsd;
+  const free = Boolean(price && price.promptPerM === 0 && price.completionPerM === 0);
+  res.json({
+    bot,
+    model,
+    basis: prof.basis, // 'measured' (average tokens of your recent calls) | 'default'
+    tokens: { prompt: prof.prompt, completion: prof.completion, samples: prof.samples },
+    priceKnown: Boolean(price),
+    promptPerM: price ? price.promptPerM : null,
+    completionPerM: price ? price.completionPerM : null,
+    isFree: free,
+    estCostPerRunUsd: est, // one call of this bot (a full RUN = scanner call + trader call)
+    estRunsPerMonthAtBudget: est === null || est === 0 ? null : Math.floor(cap / est), // null = unlimited (free) or unknown price
+    estRunsWithinRemaining: est === null || est === 0 ? null : Math.floor(remaining / est),
+    capUsd: cap,
+    remainingUsd: remaining,
+    notes: [...(free ? FREE_MODEL_NOTES : []), ...(price ? [] : ['This model is not in the loaded catalog, so its price is unknown and the governor will assume a conservative price.'])],
+  });
+}));
+
+// ---- trade proposals (approval queue) ----
+const PROPOSAL_ID = /^[\w.\-]{1,120}$/;
+async function proposalCall(res, fn) {
+  try {
+    res.json(await fn());
+  } catch (err) {
+    if (err instanceof ProposalError) return res.status(err.status).json({ error: err.message, code: err.code, ...(err.details ? { details: err.details } : {}) });
+    throw err;
+  }
+}
+router.get('/proposals', (req, res) => {
+  const status = req.query.status === undefined ? '' : String(req.query.status);
+  if (status && status !== 'all' && !STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}, all` });
+  res.json(listProposals({ status, limit: Number(req.query.limit) || 100 }));
+});
+router.post('/proposals/approve-all', asyncHandler(async (_req, res) => res.json(await approveAll({ by: 'user' }))));
+router.post('/proposals/:id/approve', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, () => approveProposal(req.params.id, { by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
+router.post('/proposals/:id/reject', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, async () => rejectProposal(req.params.id, { reason: req.body?.reason, by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
 
 router.get('/positions', asyncHandler(async (_req, res) => {
   res.json(await listPositions());
@@ -132,6 +214,9 @@ router.get('/status', (_req, res) => {
     openrouterConfigured: hasOpenRouterKey(),
     supabaseConfigured: supabaseEnabled,
     run: runState,
+    ai: aiStatus(), // { required:true, ready, blockedReason?, demo }
+    budget: budgetCompact(),
+    proposalsPending: store.getProposals().filter((p) => p.status === 'pending').length,
     mockData: alpaca.usingMock(),
     dataMode: alpaca.usingMock() ? 'mock' : 'alpaca',
     fallbacks: alpaca.getFallbacks(),
@@ -225,6 +310,9 @@ router.get('/dashboard', (_req, res) => {
     worker: store.getWorker(),
     logs: store.getLogs().slice(0, 40),
     tradingEnabled: false,
+    ai: aiStatus(),
+    budget: budgetCompact(),
+    proposalsPending: store.getProposals().filter((p) => p.status === 'pending').length,
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),
     horizonHours: store.getSettings().horizonHours,

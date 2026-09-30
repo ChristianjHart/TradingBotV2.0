@@ -1,4 +1,4 @@
-// Typed AI failures. There is NO rule-based fallback: when the AI cannot run, the run ends in an error/blocked state
+// Typed AI failures. There is NO fallback: when the AI cannot run, the run ends in an error/blocked state
 // carrying one of these machine-readable codes and nothing is traded or guessed.
 export const AI_ERROR_CODES = ['no_api_key', 'budget_exhausted', 'rate_limited', 'model_unavailable', 'invalid_output', 'upstream_error', 'timeout'];
 

@@ -97,6 +97,12 @@ export const SETTING_RULES = {
   maxClassPct: num(1, 100),
   maxPerGroup: (v) => Number.isInteger(v) && v >= 1 && v <= 20,
   dailyLossHaltPct: num(0, 50),
+  autoApprove: bool, // OFF by default; only ever true when the owner switches it on
+  autoApproveMaxAllocPct: num(0.1, 25),
+  proposalTtlHours: num(0.25, 72),
+  monthlyAiBudgetUsd: num(0, 1000),
+  netEdgeDrawdownWeight: num(0, 10),
+  netEdgeAvoidedWeight: num(0, 10),
 };
 
 /** Returns { value } of accepted fields, or { error } naming the first bad/unknown one. */

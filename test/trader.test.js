@@ -9,20 +9,27 @@ const { normalize } = await import('../server/db/supabase.js');
 const { validateSettings, SETTING_RULES } = await import('../server/middleware.js');
 const { config } = await import('../server/config.js');
 const { alpaca } = await import('../server/services/alpaca.js');
+const { approveAll } = await import('../server/services/proposals.js');
+const { stubOpenRouter } = await import('./helpers.js');
 
 const pick = (symbol, direction, price = 100) => ({ symbol, direction, confidence: 0.8, price, atrPct: 2, reason: 'test' });
 
-test('trader (rules) never shorts crypto and places stops on the correct side', async () => {
+test('trader only PROPOSES: never shorts crypto, stops on the correct side; approve-all then opens them', async () => {
+  stubOpenRouter();
   const px = async (s) => (await alpaca.getQuote(s)).price; // use mock prices so the monitor sees consistent data
   const res = await runTraderBot([pick('BTC/USD', 'short', await px('BTC/USD')), pick('AAPL', 'long', await px('AAPL')), pick('XOM', 'short', await px('XOM'))]);
-  assert.equal(res.source, 'rules');
-  assert.ok(!res.opened.some((p) => p.symbol === 'BTC/USD'));
-  for (const p of res.opened) {
-    assert.ok(p.side === 'long' ? p.stopLoss < p.entry && p.takeProfit > p.entry : p.stopLoss > p.entry && p.takeProfit < p.entry);
-    assert.ok(p.allocation <= 100_000 * 0.2 + 1e-6);
-    assert.ok(p.fees > 0);
+  assert.equal(res.source, 'ai');
+  assert.equal(store.getPositions().length, 0, 'nothing opened without approval');
+  assert.ok(!res.proposals.some((p) => p.symbol === 'BTC/USD'));
+  assert.equal(res.proposals.length, 2);
+  for (const p of res.proposals) {
+    assert.equal(p.status, 'pending');
+    assert.ok(p.side === 'long' ? p.stopLoss < p.entryFill && p.takeProfit > p.entryFill : p.stopLoss > p.entryFill && p.takeProfit < p.entryFill);
+    assert.ok(p.allocationUsd <= 100_000 * 0.2 + 1e-6);
   }
-  assert.equal(res.opened.length, 2);
+  const ap = await approveAll();
+  assert.equal(ap.approved.length, 2, JSON.stringify(ap.failed));
+  for (const p of store.getPositions()) assert.ok(p.fees > 0);
   const stored = store.getPositions();
   assert.ok(stored.every((p) => p.expiresAt && p.initialStop === p.stopLoss));
 });

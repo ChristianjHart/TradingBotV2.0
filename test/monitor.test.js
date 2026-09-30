@@ -99,7 +99,7 @@ test('RACE: openPosition and manual close during a monitor cycle are not lost', 
   fake.delayMs.set('AAA', 60);
   const mon = monitorPositions();
   await new Promise((r) => setTimeout(r, 10));
-  openPosition({ symbol: 'BBB', side: 'long', entry: 50, stopLoss: 45, takeProfit: 60, allocation: 500, qty: 10, confidence: 0.6, reason: 'x', source: 'rules' });
+  openPosition({ symbol: 'BBB', side: 'long', entry: 50, stopLoss: 45, takeProfit: 60, allocation: 500, qty: 10, confidence: 0.6, reason: 'x', source: 'ai' });
   await closeManually(c);
   await mon;
   assert.equal(get(a).status, 'closed');

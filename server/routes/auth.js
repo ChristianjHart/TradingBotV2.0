@@ -183,7 +183,7 @@ accountRouter.put('/keys', asyncHandler(async (req, res) => {
 accountRouter.put('/models', asyncHandler(async (req, res) => {
   const r = await saveModels(req.body);
   if (!r.ok) return res.status(r.status).json({ error: r.error, ...(r.code ? { code: r.code } : {}) });
-  res.json(accountSummary(req.auth?.user));
+  res.json({ ...accountSummary(req.auth?.user), warnings: r.warnings, notes: r.notes });
 }));
 
 accountRouter.post('/test', asyncHandler(async (req, res) => {

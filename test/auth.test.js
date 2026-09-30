@@ -427,6 +427,37 @@ test('PUT /account/models validates and updates the active models; empty resets 
   assert.equal(reset.body.models.scanner, before.defaults.scanner);
 });
 
+test('PUT /account/models accepts newsModel (stored, unused yet); unknown ids are allowed with a warning; free models carry caveat notes', async () => {
+  const cat = await import('../server/services/catalog.js');
+  cat._resetCatalog();
+  const c = (await signup()).cookie;
+  const before = (await call('GET', '/account', { cookie: c })).body.models;
+  assert.equal(before.news, before.defaults.news);
+  assert.equal((await call('PUT', '/account/models', { cookie: c, body: { newsModel: 'bad model' } })).status, 400);
+  // catalog not loaded: accepted, with a warning that it could not be checked
+  const a = await call('PUT', '/account/models', { cookie: c, body: { newsModel: 'vendor/some-model:free' } });
+  assert.equal(a.status, 200);
+  assert.equal(a.body.models.news, 'vendor/some-model:free');
+  assert.equal(config.openrouter.newsModel, 'vendor/some-model:free');
+  assert.ok(a.body.warnings.some((w) => /catalog is not loaded/.test(w)));
+  assert.ok(a.body.notes.some((n) => /429/.test(n)) && a.body.notes.some((n) => /training/.test(n)));
+  // catalog loaded: membership is checked, unknown ids are still saved (warned), known ones are clean
+  globalThis.fetch = async () => Response.json({ data: [{ id: 'vendor/known', pricing: { prompt: '0.000001', completion: '0.000001' } }] });
+  await cat.getCatalog({ force: true });
+  globalThis.fetch = realFetch;
+  const u = await call('PUT', '/account/models', { cookie: c, body: { scannerModel: 'vendor/unknown' } });
+  assert.equal(u.status, 200);
+  assert.equal(u.body.models.scanner, 'vendor/unknown');
+  assert.ok(u.body.warnings.some((w) => /not in the OpenRouter catalog/.test(w)));
+  const k = await call('PUT', '/account/models', { cookie: c, body: { traderModel: 'vendor/known' } });
+  assert.deepEqual(k.body.warnings, []);
+  assert.deepEqual(k.body.notes, []);
+  assert.equal(k.body.models.news, 'vendor/some-model:free'); // other fields untouched
+  const reset = await call('PUT', '/account/models', { cookie: c, body: { scannerModel: '', traderModel: '', newsModel: '' } });
+  assert.equal(reset.body.models.news, before.defaults.news);
+  cat._resetCatalog();
+});
+
 // ---------------------------------------------------------------- dynamic credentials
 test('credentials are dynamic: account keys switch mock <-> live immediately, env stays the fallback', () => {
   assert.equal(alpaca.usingMock(), true);
@@ -527,7 +558,7 @@ test('request logger never stores auth/account bodies; redact covers passwords, 
 
 test('scheduled runs skip with a logged reason when no credentials exist', () => {
   const logs = [];
-  assert.match(scheduledRunSkipReason({ now: 1e12, log: (m) => logs.push(m) }), /no OpenRouter or Alpaca credentials/);
+  assert.match(scheduledRunSkipReason({ now: 1e12, log: (m) => logs.push(m) }), /no OpenRouter key/);
   scheduledRunSkipReason({ now: 1e12 + 1000, log: (m) => logs.push(m) });
   assert.equal(logs.length, 1); // throttled
   applyCredentials({ openrouterKey: FAKE_OR });

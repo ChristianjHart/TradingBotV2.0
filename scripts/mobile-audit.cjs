@@ -3,7 +3,7 @@
  *
  *   node scripts/mobile-audit.cjs [baseUrl] [--out DIR] [--vp 320x568,390x844] [--quick] [--no-shots] [--verbose]
  *
- * Needs a running server (mock mode is fine):  PORT=3100 USE_MOCK_DATA=true node server/index.js
+ * Needs a running server (mock mode is fine):  MOCK_LLM=true PORT=3100 USE_MOCK_DATA=true node server/index.js   (MOCK_LLM lets RUN open demo positions without an OpenRouter key)
  * Uses the global Playwright + a local chromium (PW_CHROMIUM overrides /opt/pw-browsers/chromium).
  * Creates the owner account itself (UI on the first run, API afterwards) with AUDIT_EMAIL / AUDIT_PASSWORD.
  *
@@ -166,7 +166,15 @@ function pageAudit(opts) {
     if (el.matches('.scroll-y, [role=log], [role=region], main') ) return; // scroll containers focusable for keyboard scrolling
     // a role=tab with a single-line row etc still needs size
     if (r.width < 43.5 || r.height < 43.5) small.push(`${sel(el)} ${Math.round(r.width)}x${Math.round(r.height)}`);
-    if (!el.closest('tr') || el.tagName === 'BUTTON') rects.push({ el, r });
+    const reg = inScrollRegion(el);
+    let vr = r;
+    if (reg) {
+      const rr = reg.getBoundingClientRect();
+      vr = { left: Math.max(r.left, rr.left), right: Math.min(r.right, rr.right), top: Math.max(r.top, rr.top), bottom: Math.min(r.bottom, rr.bottom) };
+      vr.width = vr.right - vr.left;
+      vr.height = vr.bottom - vr.top;
+    }
+    if (!el.closest('tr') || el.tagName === 'BUTTON') rects.push({ el, r: vr });
   });
   if (small.length) problems.push(`touch target < 44px: ${small.length} e.g. ${small.slice(0, 6).join('; ')}`);
   // adjacent targets must not overlap

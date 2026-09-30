@@ -1,5 +1,5 @@
 // DEV / TEST FIXTURE ONLY. MOCK_LLM=true swaps the OpenRouter call for a deterministic canned reply so screenshots and tests
-// run with no key. It is NOT a fallback: it is never used automatically, is refused (ignored + loud warning) in production
+// run with no key. It is NOT a fallback for a missing AI: it is never used automatically, is refused (ignored + loud warning) in production
 // (NODE_ENV=production or RENDER), and everything it produces is labelled source:'demo' / model:'mock-llm'.
 import { config } from '../config.js';
 import { store } from '../db/store.js';
