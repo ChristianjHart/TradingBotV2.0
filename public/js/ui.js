@@ -1,4 +1,5 @@
 import { escapeHtml } from './api.js';
+import { revealSection } from './sections.js';
 
 let toastHost;
 function host() {
@@ -114,6 +115,7 @@ export async function tokenDialog(message) {
 export function jumpTo(id, { flash = true } = {}) {
   const el = document.getElementById(id);
   if (!el) return false;
+  revealSection(el);
   const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   el.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
   if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');

@@ -303,6 +303,7 @@ export function tfClick(e) {
 
 export function selectPos(id) {
   state.selectedPos = id;
+  document.getElementById('pos-chart-box')?.classList.add('user-sel'); // phones show the chart only after the owner taps a row
   document.querySelectorAll('.pos-row').forEach((r) => {
     const on = r.dataset.pos === id;
     r.classList.toggle('sel', on);

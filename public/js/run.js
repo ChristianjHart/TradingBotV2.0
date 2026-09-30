@@ -57,7 +57,7 @@ export function runBarHtml() {
         : state.runLocal === false
           ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded). RUN is disabled until it finishes.</span>'
           : '<span class="dim">Running…</span>';
-  return `<div class="run-bar" role="group" aria-label="Run progress"><ol class="stepper">${steps}</ol>
+  return `<div class="run-bar run-${v.kind}" role="group" aria-label="Run progress"><ol class="stepper">${steps}</ol>
     <div class="run-meta">${tail} <span class="mono dim" id="run-elapsed"></span></div></div>${pr ? problemHtml(pr) : ''}`;
 }
 

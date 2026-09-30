@@ -31,7 +31,15 @@ const defaults = {
     paper: true,
     tradingEnabled: false,
     autoScan: true, // keep monitoring positions on a schedule
-    autoRun: false, // scheduled AI runs (costs OpenRouter credits) — opt in
+    autoRun: false, // LEGACY: superseded by settings.schedule (kept so old clients/settings files stay valid; no longer triggers runs)
+    // Run schedules (see services/scheduler.js). Everything off until the owner enables it.
+    schedule: {
+      enabled: false,
+      plan: 'B', // 'A' | 'B' | 'C' | 'D' | 'custom'
+      custom: [], // [{ time:'HH:MM' (ET), days:'weekdays'|'daily', scope:'stocks'|'crypto'|'all' }]
+      cryptoRuns: [], // ET, daily — opt-in (each crypto run costs the same as a stock run)
+      eventTriggers: { enabled: false, spyMovePct: 1.0, btcMovePct: 2.5, shortlistMovePct: 3.0, minMinutesBetweenEventRuns: 120, maxEventRunsPerDay: 2, newsCatalyst: false },
+    },
     watchlistSize: config.watchlistSize,
     horizonHours: config.predictionHorizonHours,
     slippageBps: config.trading.slippageBps,
@@ -76,6 +84,7 @@ const files = {
   dayStart: path.join(config.dataDir, 'day-start.json'),
   proposals: path.join(config.dataDir, 'proposals.json'),
   aiSpend: path.join(config.dataDir, 'ai-spend.json'),
+  scheduleState: path.join(config.dataDir, 'schedule-state.json'),
 };
 
 export const MAX_POSITIONS = 1000;
@@ -233,6 +242,14 @@ export const store = {
   },
   setSpend(data) {
     put('aiSpend', files.aiSpend, data.slice(-5000));
+  },
+
+  /** Durable scheduler state: which slots fired/skipped/missed (so a restart never double-fires), event-run counters, recent skips. */
+  getScheduleState() {
+    return { slots: {}, lastFiredKey: null, events: { day: null, count: 0, lastAt: null }, skips: [], ...cached('scheduleState', files.scheduleState, {}) };
+  },
+  setScheduleState(data) {
+    put('scheduleState', files.scheduleState, data);
   },
 
   /** Start-of-ET-day equity snapshot { day:'YYYY-MM-DD', equity } used for the daily loss halt. */

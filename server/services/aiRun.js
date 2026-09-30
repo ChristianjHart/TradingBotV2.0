@@ -27,6 +27,7 @@ export const runState = {
   autoApproved: 0, // positions opened by auto-approval (0 unless the owner enabled it)
   opened: 0, // legacy alias of autoApproved
   demo: false, // true when the run used the MOCK_LLM test fixture
+  trigger: null, // { type:'manual'|'schedule'|'event'|'test', plan, slot, reason } of the current/last run
 };
 
 /** Can the AI run right now? Never spends anything. { required:true, ready, blockedReason?, demo } */
@@ -73,8 +74,9 @@ function saveRun(summary, { latest = true } = {}) {
 
 const compact = (p) => ({ id: p.id, symbol: p.symbol, side: p.side, allocationUsd: p.allocationUsd, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, confidence: p.confidence, reason: p.reason, status: p.status, expiresAt: p.expiresAt });
 
-export function startAiRun() {
+export function startAiRun({ trigger } = {}) {
   if (runState.running) return false;
+  const trig = { type: 'manual', plan: null, slot: null, reason: null, ...(trigger || {}) };
   const runId = `run_${Date.now()}`;
   Object.assign(runState, {
     running: true,
@@ -89,6 +91,7 @@ export function startAiRun() {
     autoApproved: 0,
     opened: 0,
     demo: false,
+    trigger: trig,
   });
   (async () => {
     const t0 = Date.now();
@@ -138,6 +141,7 @@ export function startAiRun() {
         traderSource: trades.source,
         traderModel: trades.model || null,
         demo: runState.demo,
+        trigger: trig,
         proposed: trades.proposed ?? 0, // how many trades the model suggested
         proposalCount: trades.proposalCount, // how many became pending proposals after the risk engine
         autoApproved: trades.autoApproved.length,
@@ -162,7 +166,7 @@ export function startAiRun() {
       store.addLog({ level: runState.stage === 'blocked' ? 'warn' : 'error', message: `AI run ${runState.stage} (${code}): ${err.message}` });
       // Failed runs go to history only, so /ai/summary keeps the last good run; previous picks/proposals/positions are untouched.
       saveRun(
-        { runId, at: new Date().toISOString(), status: runState.stage, code, durationMs: Date.now() - t0, error: err.message, picks: runState.picks, proposalCount: 0, proposals: [], trades: [], rejected: [], demo: runState.demo, costUsd: usage.costUsd, aiCalls: usage.calls },
+        { runId, at: new Date().toISOString(), status: runState.stage, code, durationMs: Date.now() - t0, error: err.message, picks: runState.picks, proposalCount: 0, proposals: [], trades: [], rejected: [], demo: runState.demo, trigger: trig, costUsd: usage.costUsd, aiCalls: usage.calls },
         { latest: false },
       );
     } finally {

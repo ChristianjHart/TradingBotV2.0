@@ -77,7 +77,7 @@ Rules worth knowing:
 - The legacy admin token (if you use `ADMIN_TOKEN` from the browser) is kept in `sessionStorage` (per tab, gone when the tab closes), not `localStorage`; a copy left by an older version is deleted.
 - State-changing requests must be `application/json` (or carry `X-Requested-With`) and any `Origin` header must match the host (or `CORS_ORIGIN`), otherwise `403 csrf`. Bearer-token requests skip the content-type rule.
 - Passwords, keys, cookies and auth request bodies are never logged (`api_logs`/`ai_logs`/app logs).
-- Scheduled runs (`autoRun`) use the active OpenRouter key and skip (with a log line, at most hourly) when there is no key or the budget cannot cover another run.
+- Scheduled and event-triggered runs (`settings.schedule`, see *Run schedules*) use the active OpenRouter key and are skipped, with a logged reason, when there is no key or the remaining budget is below the projected cost of a run.
 - Without an account, and without `ADMIN_TOKEN`, **and outside production** (no `RENDER`, `NODE_ENV` not `production`, `REQUIRE_SETUP` not `true`), the app is open (local use) and `GET /api/auth/status` reports `setupRequired: true`. `ADMIN_TOKEN` alone (no account yet) also gates the API for scripts.
 
 Every response carries `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and a Content-Security-Policy (same-origin + `*.tradingview.com` scripts/frames + Google Fonts). Market endpoints (`/api/market/*`) only serve symbols in the scanner universe or with an open position (otherwise 400).
@@ -115,7 +115,11 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 | POST | `/api/positions/:id/close` \| `/api/positions/close-all` | Manual close `?force=1` (or body `{force:true}`) closes on a stale quote. Errors: 404 unknown, 409 `stale_quote`, 502 `no_quote`; close-all returns `{closed, failed:[{id,symbol,status,code,error}]}` |
 | GET | `/api/performance` | Equity curve, win rate, avg R, drawdown, calibration, per-bot stats, plus `proposals`, `approval`, `avoidedLoss`, `missedGain`, `baselines`, `netEdge` (see *Proposals, shadow scoring and netEdge*) |
 | GET | `/api/status` | Worker, settings, `marketOpen`, `staleSymbols`, data mode, `ai:{required, ready, blockedReason?, demo}`, compact `budget`, `proposalsPending` |
-| PATCH | `/api/settings` | Slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight` |
+| GET | `/api/schedule` | `{enabled, plan, tz:'America/New_York', custom, cryptoRuns, slotsToday:[{id,timeEt,timeUtc,scope,status:'upcoming'\|'fired'\|'skipped'\|'missed',reason?}], nextRunAt, lastRuns:[{at,trigger,status,code?,costUsd,proposals}], eventTriggers:{...,active,firedToday}}` |
+| POST | `/api/schedule/test-fire` | Body `{slotId?}`. Runs through the same gate as a scheduled run, marked `trigger.type:'test'`; 202 `{started, trigger, run}`. 409 `code`: `worker_not_running` \| `run_in_progress` \| `no_api_key` \| `budget_exhausted` \| `insufficient_budget`; 400 `unknown_slot` |
+| GET | `/api/schedule/forecast?plan=A\|B\|C\|D\|custom` | Monthly cost forecast per plan (all plans + `current` when `plan` is omitted; 400 `invalid_plan`) |
+| GET | `/api/schedule/experiments` | Per plan and trigger type: runs, avg cost, proposals/run, approval rate, net edge, edge per dollar (null until enough samples) |
+| PATCH | `/api/settings` | Slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight`, `schedule` (partial object, deep-merged; see *Run schedules*) |
 | GET | `/api/health` | Public |
 
 `/api/dashboard` remains as a slim summary (accuracy, worker, logs). The legacy `/watchlist`, `/predictions`, `/accuracy`, `/model`, `/scan`, `/train`, `/evaluate` endpoints were removed.
@@ -157,6 +161,26 @@ Press **RUN** on the dashboard:
 | `timeout` | error | no answer in time |
 
 Each call sends `usage: {include: true}` and reads the provider-reported `usage.cost`; when that is missing the cost is estimated from tokens × the catalog price. JSON mode (`response_format`) is requested when the model supports it and dropped automatically if the provider rejects it. Invalid JSON gets exactly **one** repair retry (billed and counted like any call).
+
+### Run schedules, event triggers and cost forecast
+
+The old `autoRun` cron is gone (the setting is still accepted but does nothing). Runs are driven by `settings.schedule` (off by default), evaluated every minute on **America/New_York** wall-clock time (DST-safe, NYSE holidays and 13:00 half-days from the built-in table):
+
+| Plan | Slots (weekdays, ET) |
+|---|---|
+| A | 09:00, 12:30 |
+| B | 09:00 |
+| C | B + event triggers on |
+| D | 09:00, 13:00, 16:15 |
+| custom | `schedule.custom`: `[{time:'HH:MM', days:'weekdays'\|'daily', scope:'stocks'\|'crypto'\|'all'}]` |
+
+`schedule.cryptoRuns` (default `[]`, opt-in — each crypto run costs the same as a stock run; e.g. `['09:00','21:00']` ET) adds daily crypto-scope slots; a crypto slot at the same time as another slot merges into it (scope `all`). Stock-scope slots are skipped on holidays/weekends; on a half-day an after-close slot moves 3 h earlier. Settings shape: `schedule: {enabled, plan, custom, cryptoRuns, eventTriggers:{enabled, spyMovePct:1.0, btcMovePct:2.5, shortlistMovePct:3.0, minMinutesBetweenEventRuns:120, maxEventRunsPerDay:2, newsCatalyst}}` (`newsCatalyst` is reserved and does nothing yet). `PATCH /api/settings {schedule:{...}}` validates and deep-merges (bad times, unknown plans/fields → 400).
+
+Every scheduled, event or test run: needs the AI (no fallback), is skipped with a logged reason when remaining budget is below the projected cost of a run (measured average of full runs, else an estimate), never starts while another run is in progress, and is recorded as `trigger:{type:'schedule'|'event'|'manual'|'test', plan, slot, reason}` on the run and in `GET /api/runs`. When the budget level is `warn`, event runs are dropped before scheduled ones. Fired/skipped/missed slots are persisted (`data/schedule-state.json`, plus `trigger.slot` on the run history), so a restart never double-fires; a slot missed by up to 20 minutes (e.g. during a restart) fires once, older ones are skipped and logged.
+
+Event triggers (plan C, or `eventTriggers.enabled`) poll every 5 minutes with no LLM calls: SPY, BTC/USD and the current shortlist versus their previous daily close; stocks only while the market is open. A run starts when a move crosses its threshold, honouring `minMinutesBetweenEventRuns` and `maxEventRunsPerDay` (ET day).
+
+`GET /api/schedule/forecast` projects the next 30 days per plan: real trading days (holidays excluded) plus crypto runs, `eventRunsAssumed` (C: 4 per month as a rough guess; D: 0 because its fixed slots cover the day), cost per run (`basis` `measured` from the ledger's full runs, `estimated` from model prices x default token sizes, or `unknown`), `projectedMonthlyUsd`, `pctOfBudget`, `fitsBudget`. `/api/status` → `budget.forecast` carries the active plan's forecast. `GET /api/schedule/experiments` compares plans and trigger types (`edgePerDollar` stays null until 10 runs and 10 shadow-scored proposals).
 
 ### Budget (hard cap, default $20/month)
 

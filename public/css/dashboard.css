@@ -1914,3 +1914,68 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
   .prop-empty { max-width: 720px; }
 }
 @media (min-width: 1101px) and (max-width: 1400px) { .acct-email { display: none; } }
+
+/* ---------------- phone dashboard: short page, collapsible sections (<=700px) ---------------- */
+/* The toggle header exists on every viewport but only phones show it (desktop keeps the widget's own title). */
+.dsec-hw { display: none; }
+@media (max-width: 700px) {
+  .page:has(> .grid-top) { display: flex; flex-direction: column; gap: 12px; }
+  .page:has(> .grid-top) > :empty { display: none; }
+  .page:has(> .grid-top) > .grid-top, .page:has(> .grid-top) > .grid-ai { display: contents; }
+  .page:has(> .grid-top) .widget { margin: 0; min-height: 0; }
+  .page:has(> .grid-top) .perf-section { margin: 0; }
+  #dsec-pos { order: 1; } #dsec-sum { order: 2; } #sec-budget-w { order: 3; } #dsec-picks { order: 4; }
+  #dsec-perf { order: 5; } #dsec-acc { order: 6; } #dsec-alloc { order: 7; } #sys-strip { order: 8; }
+
+  .widget[data-dsec] > .widget-title { display: none; }
+  .widget[data-dsec] { padding-top: 0; }
+  .widget[data-dsec] > .dsec-hw { display: block; }
+  .widget[data-dsec]:not(.is-collapsed) > .dsec-hw { margin-bottom: 4px; }
+  .dsec-h {
+    display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0; border: 0; background: transparent;
+    color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; text-align: left; cursor: pointer;
+    border-radius: var(--radius);
+  }
+  .dsec-t { flex: none; }
+  .dsec-s { flex: 1 1 auto; min-width: 0; color: var(--text); font-weight: 600; letter-spacing: 0; text-transform: none; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .dsec-chev { flex: none; width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.18s ease; }
+  .widget[data-dsec].is-collapsed > .dsec-hw .dsec-chev { transform: rotate(-90deg); }
+  .widget[data-dsec].is-collapsed > :not(.dsec-hw) { display: none; }
+  .widget[data-dsec].is-collapsed { padding-bottom: 0; }
+  .dsec-h:focus-visible { outline: 2px solid #60a5fa; outline-offset: 0; }
+  @media (prefers-reduced-motion: reduce) { .dsec-chev { transition: none; } }
+}
+
+/* phone dashboard: compact the always-visible parts so proposals + positions fit early on the page */
+@media (max-width: 700px) {
+  .page:has(> .grid-top) { padding-top: 8px; gap: 8px; }
+  .page:has(> .grid-top) .banner-mock, .page:has(> .grid-top) .notice { padding: 8px 10px; font-size: 12.5px; line-height: 1.4; margin: 0; }
+  .page:has(> .grid-top) #banners { display: grid; gap: 6px; }
+  .page:has(> .grid-top) .run-bar { padding: 8px 10px; margin: 0; gap: 6px; }
+  .page:has(> .grid-top) .step { flex-direction: row; align-items: center; gap: 6px; }
+  .page:has(> .grid-top) .step-dot { width: 22px; height: 22px; }
+  .page:has(> .grid-top) .step-txt { font-size: 12px; }
+  .page:has(> .grid-top) .step-txt small { display: none; }
+  .page:has(> .grid-top) .run-meta { font-size: 13px; }
+  .proposals-card { padding-top: 10px; }
+  .proposals-card .widget-title { margin-bottom: 4px; }
+  .pcard { padding: 10px 12px; gap: 8px; }
+  .pcard .pc-risk-l, .pcard .pc-src, .pcard .conf-bar { display: none; }
+  .pcard .pc-risk { padding: 6px 10px; }
+  .pcard .pc-why .clamp { -webkit-line-clamp: 2; line-clamp: 2; }
+  .pcard .pc-price { padding: 5px 8px; }
+  #dsec-pos .td-reason, #dsec-pos .rtxt { display: none !important; }
+  #pos-chart-box .chart-box { height: 200px; }
+}
+@media (max-width: 700px) {
+  .page:has(> .grid-top) .run-bar.run-done .stepper { display: none; }
+  #pos-chart-box:not(.user-sel) { display: none; }
+  .pcard .pc-sym { overflow-wrap: break-word; font-size: 19px; }
+  .pcard .pc-top { gap: 6px 14px; }
+  .pcard .pc-alloc, .pcard .pc-conf strong { font-size: 18px; }
+  .pcard .pc-risk { border: 0; background: none; padding: 0; gap: 2px; }
+  .pcard .pc-why { margin-top: -2px; }
+  .pcard .pc-left-w { display: none; }
+  .pcard .pc-top { align-items: center; }
+  .pcard .pc-price dd small { white-space: nowrap; font-size: 11px; }
+}

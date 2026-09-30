@@ -12,6 +12,7 @@ import { listPositions, closeManually, closeAll } from '../services/positions.js
 import { computePerformance } from '../services/performance.js';
 import { pickStats } from '../services/picks.js';
 import { usMarketOpen } from '../services/market.js';
+import { scheduleView, forecast as scheduleForecast, experiments as scheduleExperiments, activeForecast, testFire, slotsForDay, scheduleOf, etDayKey, mergeSchedule, PLANS } from '../services/scheduler.js';
 import { rateLimit, validateSettings, validSymbol, asyncHandler } from '../middleware.js';
 import { UNIVERSE } from '../services/universe.js';
 import { resolveAuth, authGate, csrfGuard, setupGuard } from '../auth/index.js';
@@ -71,7 +72,7 @@ router.post('/run', runLimit, (_req, res) => {
   if (ws === 'stopped' || ws === 'killed') {
     return res.status(409).json({ error: `worker is ${ws}: start the worker before running the AI desk`, code: 'worker_not_running', workerStatus: ws });
   }
-  const started = startAiRun();
+  const started = startAiRun({ trigger: { type: 'manual', plan: scheduleOf().plan } });
   res.status(started ? 202 : 200).json({ started, ...runState });
 });
 
@@ -79,7 +80,7 @@ router.get('/run/status', (_req, res) => res.json(runState));
 
 router.get('/runs', (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
-  res.json({ runs: store.getRuns().slice(0, limit) });
+  res.json({ runs: store.getRuns().slice(0, limit).map((r) => ({ ...r, trigger: r.trigger ?? { type: 'manual', plan: null, slot: null, reason: null } })) });
 });
 
 router.get('/ai/summary', (_req, res) => res.json(store.getRunSummary() || {}));
@@ -215,7 +216,7 @@ router.get('/status', (_req, res) => {
     supabaseConfigured: supabaseEnabled,
     run: runState,
     ai: aiStatus(), // { required:true, ready, blockedReason?, demo }
-    budget: budgetCompact(),
+    budget: { ...budgetCompact(), projectedMonthEndUsd: budgetStatus().projectedMonthEndUsd, forecast: activeForecast() },
     proposalsPending: store.getProposals().filter((p) => p.status === 'pending').length,
     mockData: alpaca.usingMock(),
     dataMode: alpaca.usingMock() ? 'mock' : 'alpaca',
@@ -274,8 +275,10 @@ router.get('/settings', (_req, res) => {
 router.patch('/settings', (req, res) => {
   const { value, error } = validateSettings(req.body);
   if (error) return res.status(400).json({ error });
+  const current = store.getSettings();
+  if (value.schedule) value.schedule = mergeSchedule(current.schedule, value.schedule);
   const next = {
-    ...store.getSettings(),
+    ...current,
     ...value,
     tradingEnabled: false, // never allow enabling trades from API
     mode: 'predict',
@@ -283,6 +286,29 @@ router.patch('/settings', (req, res) => {
   store.setSettings(next);
   store.addLog({ level: 'info', message: 'settings updated (trading remains disabled)' });
   res.json(next);
+});
+
+// ---- run schedules, forecast, experiments ----
+router.get('/schedule', (_req, res) => res.json(scheduleView()));
+
+router.get('/schedule/forecast', (req, res) => {
+  const plan = req.query.plan;
+  if (plan !== undefined && !PLANS.includes(plan)) return res.status(400).json({ error: `unknown plan (one of ${PLANS.join(', ')})`, code: 'invalid_plan' });
+  res.json(scheduleForecast({ plan }));
+});
+
+router.get('/schedule/experiments', (_req, res) => res.json(scheduleExperiments()));
+
+const TEST_FIRE_STATUS = { worker_not_running: 'worker_not_running', run_in_progress: 'run_in_progress' };
+router.post('/schedule/test-fire', runLimit, (req, res) => {
+  const slotId = req.body?.slotId ?? null;
+  if (slotId !== null && (typeof slotId !== 'string' || !slotsForDay(etDayKey(Date.now()), scheduleOf()).some((s) => s.id === slotId))) {
+    return res.status(400).json({ error: 'unknown slotId (use an id from GET /api/schedule slotsToday)', code: 'unknown_slot' });
+  }
+  const r = testFire({ slotId });
+  if (r.started) return res.status(202).json({ started: true, trigger: r.trigger, run: runState });
+  const code = TEST_FIRE_STATUS[r.reason] || r.reason;
+  res.status(409).json({ started: false, error: r.detail ? `${r.reason}: ${r.detail}` : `test run not started: ${r.reason}`, code, workerStatus: store.getWorker().status });
 });
 
 router.post('/worker/stop', (_req, res) => {

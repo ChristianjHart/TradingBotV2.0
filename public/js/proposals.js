@@ -3,6 +3,7 @@ import { approveAllOutcome, approveAllPlan, approveProblem, outcomeText, proposa
 import { refresh } from './data.js';
 import { $, empty, hooks, setHtml, setText, skeleton, state, TITLES } from './state.js';
 import { aiBlocked } from './ai-logic.js';
+import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
 
 /* ---------- selectors over state ---------- */
@@ -358,6 +359,7 @@ async function approveAll() {
 /** Jump to a position row (switching to the Closed tab when needed) and flash it. */
 export function jumpToPosition(id) {
   const sel = `[data-pos="${CSS.escape(String(id))}"]`;
+  revealSection($('pos-open'));
   let row = document.querySelector(`#pos-open ${sel}`);
   if (!row) {
     document.getElementById('tab-closed')?.click();

@@ -5,6 +5,9 @@ import { applyPosTab, patchPositions, posChange, posClick, posKey, tfButtonsHtml
 import { patchBudgetWidget } from './budget.js';
 import { bindProposals, patchProposals, proposalsShellHtml, setRerun } from './proposals.js';
 import { onRunClick, patchRunBar, startRun } from './run.js';
+import { bindSections, applySections, patchSectionSummaries, sectionHeadHtml } from './sections.js';
+import { budgetView } from './ai-logic.js';
+import { currentBudget } from './budget.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
 /* ---------- dashboard widgets ---------- */
@@ -130,18 +133,20 @@ export function mountDashboard() {
     <div id="run-bar" role="status" aria-live="polite"></div>
     ${proposalsShellHtml()}
     <div class="grid grid-top">
-      <section class="widget ai-summary" aria-labelledby="h-sum"><h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
-      <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w"><h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
-      <section class="widget allocation-box" aria-labelledby="h-alloc"><h2 class="widget-title" id="h-alloc">ALLOCATION</h2><div id="w-alloc"></div></section>
-      <section class="widget model-acc" aria-labelledby="h-acc"><h2 class="widget-title" id="h-acc">MODEL ACCURACY</h2><div id="w-acc"></div></section>
+      <section class="widget ai-summary" aria-labelledby="h-sum" id="dsec-sum" data-dsec="sum">${sectionHeadHtml('sum')}<h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
+      <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w" data-dsec="budget">${sectionHeadHtml('budget')}<h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
+      <section class="widget allocation-box" aria-labelledby="h-alloc" id="dsec-alloc" data-dsec="alloc">${sectionHeadHtml('alloc')}<h2 class="widget-title" id="h-alloc">ALLOCATION</h2><div id="w-alloc"></div></section>
+      <section class="widget model-acc" aria-labelledby="h-acc" id="dsec-acc" data-dsec="acc">${sectionHeadHtml('acc')}<h2 class="widget-title" id="h-acc">MODEL ACCURACY</h2><div id="w-acc"></div></section>
     </div>
     <div class="run-status dim" id="sys-strip"></div>
     <div class="grid grid-ai">
-      <section class="widget ai-picks" aria-labelledby="h-picks">
+      <section class="widget ai-picks" aria-labelledby="h-picks" id="dsec-picks" data-dsec="picks">
+        ${sectionHeadHtml('picks')}
         <h2 class="widget-title" id="h-picks"><span id="picks-title">SCANNER TOP PICKS</span><span class="dim" id="picks-badge"></span></h2>
         <div id="w-picks"></div>
       </section>
-      <section class="widget ai-positions" aria-labelledby="h-pos">
+      <section class="widget ai-positions" aria-labelledby="h-pos" id="dsec-pos" data-dsec="pos">
+        ${sectionHeadHtml('pos')}
         <h2 class="widget-title" id="h-pos"><span>POSITIONS (SIMULATED)</span></h2>
         <div class="pos-toolbar">
           <div class="tabs" role="tablist" aria-label="Positions">
@@ -161,8 +166,10 @@ export function mountDashboard() {
         </div>
       </section>
     </div>
-    <section class="widget perf-section" aria-labelledby="h-perf"><h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span><a class="dim" href="#performance">Details &amp; run history →</a></h2>${perfShellHtml()}</section>
+    <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf')}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span><a class="dim" href="#performance">Details &amp; run history →</a></h2>${perfShellHtml()}</section>
   </div>`;
+  bindSections(root);
+  applySections(root);
   $('btn-scan').addEventListener('click', startRun);
   $('run-bar').addEventListener('click', onRunClick);
   $('run-gate').addEventListener('click', onRunClick);
@@ -210,6 +217,27 @@ export function patchDashboard() {
   patchPerf();
   patchRunBar();
   patchUpdated();
+  patchSectionSummaries(sectionData());
+}
+
+/** Numbers for the collapsed-section summaries on phones. */
+function sectionData() {
+  const acct = state.positions?.account;
+  const bv = budgetView(currentBudget());
+  const p = state.perf;
+  const closed = p?.closed ?? acct?.closedCount ?? 0;
+  const wins = p?.wins ?? acct?.wins ?? 0;
+  const equity = Number(acct?.equity);
+  const cash = Number(acct?.cash);
+  return {
+    pos: { openCount: state.loaded ? (state.positions?.open || []).length : null, unrealized: Number(acct?.unrealizedPnl) },
+    sum: { proposalCount: state.summary?.at ? state.summary.proposalCount ?? state.summary.proposals?.length ?? 0 : null },
+    budget: { spentText: bv?.spentText, capText: bv?.capText },
+    picks: { picksCount: state.loaded ? state.picks?.picks?.length || 0 : null },
+    perf: { netEdge: p?.netEdge == null ? NaN : Number(p.netEdge), closed },
+    acc: { closed, winRatePct: p?.winRate != null ? pctOf(p.winRate) : closed ? (wins / closed) * 100 : 0 },
+    alloc: { cashPct: equity > 0 && Number.isFinite(cash) ? (Math.max(0, cash) / equity) * 100 : NaN },
+  };
 }
 
 export function patchUpdated() {

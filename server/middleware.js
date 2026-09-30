@@ -1,5 +1,6 @@
 import net from 'node:net';
 import { config } from './config.js';
+import { validateSchedule } from './services/scheduler.js';
 
 function expandV6(a) {
   let addr = a;
@@ -111,6 +112,12 @@ export function validateSettings(body) {
   const value = Object.create(null);
   for (const [k, v] of Object.entries(body)) {
     if (k === 'tradingEnabled' || k === 'mode' || k === 'paper') continue; // locked, silently ignored
+    if (k === 'schedule') {
+      const r = validateSchedule(v);
+      if (r.error) return { error: r.error };
+      value.schedule = r.value; // partial; the route merges it into the stored schedule
+      continue;
+    }
     if (!Object.hasOwn(SETTING_RULES, k)) return { error: `unknown setting: ${k}` }; // also rejects __proto__ / constructor / prototype
     if (!SETTING_RULES[k](v)) return { error: `invalid value for ${k}` };
     value[k] = v;
