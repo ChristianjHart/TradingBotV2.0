@@ -31,6 +31,7 @@ const PW = 'correct-horse-battery';
 const FAKE_OR = 'sk-or-v1-FAKEOPENROUTERSECRET1234';
 const FAKE_AK = 'PKFAKEALPACAKEYID9876';
 const FAKE_AS = 'FAKEALPACASECRETVALUEabcdef0123456789';
+const FAKE_FH = 'fhFAKEFINNHUBTOKEN0123456789zz';
 
 async function call(method, url, { body, cookie, headers = {}, raw } = {}) {
   const r = await realFetch(`${base}/api${url}`, {
@@ -64,7 +65,7 @@ beforeEach(() => {
   delete process.env.SIGNUP_CODE;
   delete process.env.ALLOW_SIGNUP;
   process.env.USE_MOCK_DATA = 'true';
-  applyCredentials({ openrouterKey: '', alpacaKey: '', alpacaSecret: '', scannerModel: '', traderModel: '' });
+  applyCredentials({ openrouterKey: '', alpacaKey: '', alpacaSecret: '', finnhubKey: '', scannerModel: '', traderModel: '' });
   config.openrouter.key = '';
   config.alpaca.key = '';
   config.alpaca.secret = '';
@@ -347,17 +348,18 @@ test('AES-256-GCM round trip, random IV, wrong secret / tampering cannot decrypt
 
 test('account keys: saved encrypted, applied immediately, never returned by any endpoint or log; wrong APP_SECRET makes them unreadable', async () => {
   const c = (await signup()).cookie;
-  const put = await call('PUT', '/account/keys', { cookie: c, body: { openrouterKey: ` ${FAKE_OR} `, alpacaKey: FAKE_AK, alpacaSecret: FAKE_AS } });
+  const put = await call('PUT', '/account/keys', { cookie: c, body: { openrouterKey: ` ${FAKE_OR} `, alpacaKey: FAKE_AK, alpacaSecret: FAKE_AS, finnhubKey: FAKE_FH } });
   assert.equal(put.status, 200);
   assert.deepEqual(put.body.keys, {
     openrouter: { set: true, source: 'account', last4: FAKE_OR.slice(-4) },
+    finnhub: { set: true, source: 'account', last4: FAKE_FH.slice(-4) },
     alpaca: { set: true, source: 'account', keyLast4: FAKE_AK.slice(-4), secretSet: true },
   });
   assert.equal(put.body.encryptionReady, true);
   assert.equal(config.openrouter.key, FAKE_OR); // trimmed + active immediately
   assert.equal(config.alpaca.key, FAKE_AK);
   // never in any response
-  const secrets = [FAKE_OR, FAKE_AK, FAKE_AS, PW];
+  const secrets = [FAKE_OR, FAKE_AK, FAKE_AS, FAKE_FH, PW];
   const seen = [put.text];
   for (const p of ['/account', '/status', '/health', '/logs?limit=500', '/dashboard', '/settings', '/runs', '/auth/status']) seen.push((await call('GET', p, { cookie: c })).text);
   seen.push(JSON.stringify(store.getLogs()));
@@ -379,7 +381,9 @@ test('account keys: saved encrypted, applied immediately, never returned by any 
   applyOwnerCredentials();
   assert.equal(config.openrouter.key, FAKE_OR);
   // clear
-  const cleared = await call('PUT', '/account/keys', { cookie: c, body: { clear: ['openrouter', 'alpaca'] } });
+  const cleared = await call('PUT', '/account/keys', { cookie: c, body: { clear: ['openrouter', 'alpaca', 'finnhub'] } });
+  assert.equal(cleared.body.keys.finnhub.set, false);
+  assert.equal(config.finnhub.key, '');
   assert.equal(cleared.body.keys.openrouter.set, false);
   assert.equal(cleared.body.keys.openrouter.source, 'none');
   assert.equal(cleared.body.keys.openrouter.last4, null);

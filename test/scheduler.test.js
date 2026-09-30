@@ -240,14 +240,15 @@ test('forecast cost basis: unknown -> estimated -> measured, pct of budget and f
   assert.equal(f0.estCostPerRunUsd, null);
   assert.equal(f0.projectedMonthlyUsd, null);
   assert.equal(f0.fitsBudget, null);
-  const saved = [config.openrouter.scannerModel, config.openrouter.traderModel];
+  const saved = [config.openrouter.scannerModel, config.openrouter.traderModel, config.openrouter.newsModel];
   config.openrouter.scannerModel = 'x/free-model:free';
   config.openrouter.traderModel = 'y/free-model:free';
+  config.openrouter.newsModel = 'z/free-model:free'; // the news stage is enabled by default and is part of a run's cost
   const f1 = S.forecastForPlan('B', { now });
   assert.equal(f1.basis, 'estimated');
   assert.equal(f1.estCostPerRunUsd, 0);
   assert.equal(f1.fitsBudget, true);
-  [config.openrouter.scannerModel, config.openrouter.traderModel] = saved;
+  [config.openrouter.scannerModel, config.openrouter.traderModel] = saved; // the free news model stays until the end of the test
   // measured from two full runs ($0.30 and $0.50) + one scanner-only run that must be ignored
   for (const [run, s, tr] of [['r1', 0.2, 0.1], ['r2', 0.3, 0.2]]) {
     recordSpend({ bot: 'scanner', model: 'm', promptTokens: 10, completionTokens: 10, costUsd: s, runId: run });
@@ -262,6 +263,7 @@ test('forecast cost basis: unknown -> estimated -> measured, pct of budget and f
   assert.equal(f2.pctOfBudget, 42);
   assert.equal(f2.fitsBudget, true);
   assert.equal(S.forecastForPlan('D', { now }).fitsBudget, false); // 63 x 0.4 = 25.2 > 20
+  config.openrouter.newsModel = saved[2];
 });
 
 // ---- experiments ----

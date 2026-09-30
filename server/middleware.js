@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { config } from './config.js';
 import { validateSchedule } from './services/scheduler.js';
+import { validateNewsSettings } from './services/newsNotes.js';
 
 function expandV6(a) {
   let addr = a;
@@ -116,6 +117,12 @@ export function validateSettings(body) {
       const r = validateSchedule(v);
       if (r.error) return { error: r.error };
       value.schedule = r.value; // partial; the route merges it into the stored schedule
+      continue;
+    }
+    if (k === 'news') {
+      const r = validateNewsSettings(v);
+      if (r.error) return { error: r.error };
+      value.news = r.value; // partial; the route merges it into the stored news settings
       continue;
     }
     if (!Object.hasOwn(SETTING_RULES, k)) return { error: `unknown setting: ${k}` }; // also rejects __proto__ / constructor / prototype

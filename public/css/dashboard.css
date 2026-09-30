@@ -1975,6 +1975,7 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
   .pcard .pc-alloc, .pcard .pc-conf strong { font-size: 18px; }
   .pcard .pc-risk { border: 0; background: none; padding: 0; gap: 2px; }
   .pcard .pc-why { margin-top: -2px; }
+  .pcard .clamp.clamped { min-height: 44px; }
   .pcard .pc-left-w { display: none; }
   .pcard .pc-top { align-items: center; }
   .pcard .pc-price dd small { white-space: nowrap; font-size: 11px; }

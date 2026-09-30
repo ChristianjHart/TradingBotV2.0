@@ -47,12 +47,15 @@ services:
       # The AI is required (no fallback): without this key every run ends 'blocked' (no_api_key). Do NOT set MOCK_LLM here: it is refused in production.
       - key: OPENROUTER_API_KEY
         sync: false
+      # Optional free Finnhub key (earnings dates for the news bot; can also be saved under Settings -> Account). Without it the news stage runs on headlines only.
+      - key: FINNHUB_API_KEY
+        sync: false
       # Hard monthly cap on AI spend in USD (UTC calendar month); also editable in Settings.
       - key: MONTHLY_AI_BUDGET_USD
         value: "20"
       # SUPABASE_*: STRONGLY RECOMMENDED. The free-plan disk is ephemeral: without Supabase every restart/redeploy forgets the owner
       # account, stored API keys and logged-out sessions (the app then fails closed to setup mode and you must sign up again).
-      # Run supabase/migrations/001..005 (or supabase/setup_all.sql) in the Supabase SQL editor; 005 keeps proposals and the AI budget across redeploys.
+      # Run supabase/migrations/001..006 (or supabase/setup_all.sql) in the Supabase SQL editor; 005 keeps proposals and the AI budget across redeploys, 006 the news research notes.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { store } from '../db/store.js';
 import { alpaca } from '../services/alpaca.js';
-import { config, hasAlpacaCredentials, hasOpenRouterKey } from '../config.js';
+import { config, hasAlpacaCredentials, hasOpenRouterKey, hasFinnhubKey } from '../config.js';
+import { mockNewsEnabled } from '../services/mockNews.js';
+import { newsSettings } from '../services/newsNotes.js';
 import { supabaseEnabled } from '../db/supabase.js';
 import { startAiRun, runState, aiStatus } from '../services/aiRun.js';
 import { mockLlmEnabled } from '../services/mockLlm.js';
@@ -53,10 +55,12 @@ router.get('/health', (_req, res) => {
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
+    finnhubConfigured: hasFinnhubKey(),
     supabaseConfigured: supabaseEnabled,
     mockData: alpaca.usingMock(),
     fallbacks: alpaca.getFallbacks(),
     mockLlm: mockLlmEnabled(), // true = MOCK_LLM test fixture active: everything the AI produces is DEMO DATA
+    mockNews: mockNewsEnabled(), // true = MOCK_NEWS fixture active: headlines/earnings are canned
   });
 });
 
@@ -80,7 +84,7 @@ router.get('/run/status', (_req, res) => res.json(runState));
 
 router.get('/runs', (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
-  res.json({ runs: store.getRuns().slice(0, limit).map((r) => ({ ...r, trigger: r.trigger ?? { type: 'manual', plan: null, slot: null, reason: null } })) });
+  res.json({ runs: store.getRuns().slice(0, limit).map((r) => ({ ...r, news: r.news ?? null, trigger: r.trigger ?? { type: 'manual', plan: null, slot: null, reason: null } })) });
 });
 
 router.get('/ai/summary', (_req, res) => res.json(store.getRunSummary() || {}));
@@ -147,7 +151,7 @@ router.get('/models/estimate', asyncHandler(async (req, res) => {
     promptPerM: price ? price.promptPerM : null,
     completionPerM: price ? price.completionPerM : null,
     isFree: free,
-    estCostPerRunUsd: est, // one call of this bot (a full RUN = scanner call + trader call)
+    estCostPerRunUsd: est, // one call of this bot (a full RUN = scanner call + trader call + news call when the news stage is enabled)
     estRunsPerMonthAtBudget: est === null || est === 0 ? null : Math.floor(cap / est), // null = unlimited (free) or unknown price
     estRunsWithinRemaining: est === null || est === 0 ? null : Math.floor(remaining / est),
     capUsd: cap,
@@ -155,6 +159,30 @@ router.get('/models/estimate', asyncHandler(async (req, res) => {
     notes: [...(free ? FREE_MODEL_NOTES : []), ...(price ? [] : ['This model is not in the loaded catalog, so its price is unknown and the governor will assume a conservative price.'])],
   });
 }));
+
+// ---- news & earnings research notes ----
+const RUN_ID = /^[\w.\-]{1,120}$/;
+const pubNote = (n) => ({ symbol: n.symbol, runId: n.runId, at: n.at, sentiment: n.sentiment, catalyst: n.catalyst, earningsInDays: n.earningsInDays ?? null, riskFlags: n.riskFlags ?? [], summary: n.summary, sources: n.sources ?? [] });
+router.get('/research', (req, res) => {
+  const { runId, symbol } = req.query;
+  if (runId !== undefined && (typeof runId !== 'string' || !RUN_ID.test(runId))) return res.status(400).json({ error: 'invalid runId', code: 'invalid_run_id' });
+  if (symbol !== undefined && (typeof symbol !== 'string' || !validSymbol(symbol))) return res.status(400).json({ error: 'invalid symbol', code: 'invalid_symbol' });
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const canon = (s) => String(s).toUpperCase().replace('/', '');
+  const notes = store.getResearch().filter((n) => (runId === undefined || n.runId === runId) && (symbol === undefined || canon(n.symbol) === canon(symbol))).slice(0, limit).map(pubNote);
+  res.json({ notes, count: notes.length });
+});
+router.get('/research/latest', (_req, res) => {
+  const seen = new Set();
+  const notes = [];
+  for (const n of store.getResearch()) {
+    const k = String(n.symbol).toUpperCase().replace('/', '');
+    if (seen.has(k)) continue;
+    seen.add(k);
+    notes.push(pubNote(n));
+  }
+  res.json({ notes, count: notes.length });
+});
 
 // ---- trade proposals (approval queue) ----
 const PROPOSAL_ID = /^[\w.\-]{1,120}$/;
@@ -208,8 +236,10 @@ router.get('/status', (_req, res) => {
     worker,
     settings: {
       ...settings,
+      news: newsSettings(settings),
       tradingEnabled: false, // hard lock — predictions only
     },
+    news: { enabled: newsSettings(settings).enabled, headlinesAvailable: mockNewsEnabled() || hasAlpacaCredentials(), earningsAvailable: mockNewsEnabled() || hasFinnhubKey(), mock: mockNewsEnabled(), model: config.openrouter.newsModel },
     accuracy: accuracy(),
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
@@ -269,7 +299,8 @@ router.get('/market/quotes', asyncHandler(async (req, res) => {
 }));
 
 router.get('/settings', (_req, res) => {
-  res.json({ ...store.getSettings(), tradingEnabled: false });
+  const s = store.getSettings();
+  res.json({ ...s, news: newsSettings(s), tradingEnabled: false });
 });
 
 router.patch('/settings', (req, res) => {
@@ -277,6 +308,7 @@ router.patch('/settings', (req, res) => {
   if (error) return res.status(400).json({ error });
   const current = store.getSettings();
   if (value.schedule) value.schedule = mergeSchedule(current.schedule, value.schedule);
+  if (value.news) value.news = { ...newsSettings(current), ...value.news };
   const next = {
     ...current,
     ...value,
@@ -285,7 +317,7 @@ router.patch('/settings', (req, res) => {
   };
   store.setSettings(next);
   store.addLog({ level: 'info', message: 'settings updated (trading remains disabled)' });
-  res.json(next);
+  res.json({ ...next, news: newsSettings(next) });
 });
 
 // ---- run schedules, forecast, experiments ----

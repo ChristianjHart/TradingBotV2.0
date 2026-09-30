@@ -4,6 +4,7 @@ import { config, hasOpenRouterKey } from '../config.js';
 import { alpaca } from './alpaca.js';
 import { gatherMarketData, runScannerBot } from './aiScanner.js';
 import { runTraderBot } from './traderBot.js';
+import { runNewsStage } from './newsBot.js';
 import { monitorPositions } from './positions.js';
 import { recordPicks, scorePicks } from './pickScoring.js';
 import { scoreShadows } from './shadow.js';
@@ -16,7 +17,7 @@ const log = (msg) => console.log(`[run] ${msg}`);
 
 export const runState = {
   running: false,
-  stage: 'idle', // idle | fetching | scanning | trading | done | error | blocked
+  stage: 'idle', // idle | fetching | scanning | news | trading | done | error | blocked
   runId: null,
   startedAt: null,
   finishedAt: null,
@@ -27,6 +28,7 @@ export const runState = {
   autoApproved: 0, // positions opened by auto-approval (0 unless the owner enabled it)
   opened: 0, // legacy alias of autoApproved
   demo: false, // true when the run used the MOCK_LLM test fixture
+  news: null, // { status:'ok'|'partial'|'skipped'|'error', reason, symbols, headlines, earningsKnown, costUsd, notes } of the current/last run's news stage
   trigger: null, // { type:'manual'|'schedule'|'event'|'test', plan, slot, reason } of the current/last run
 };
 
@@ -72,7 +74,7 @@ function saveRun(summary, { latest = true } = {}) {
   });
 }
 
-const compact = (p) => ({ id: p.id, symbol: p.symbol, side: p.side, allocationUsd: p.allocationUsd, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, confidence: p.confidence, reason: p.reason, status: p.status, expiresAt: p.expiresAt });
+const compact = (p) => ({ earningsInDays: p.earningsInDays ?? null, riskFlags: p.riskFlags ?? [], rejectReason: p.rejectReason ?? null, id: p.id, symbol: p.symbol, side: p.side, allocationUsd: p.allocationUsd, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, confidence: p.confidence, reason: p.reason, status: p.status, expiresAt: p.expiresAt });
 
 export function startAiRun({ trigger } = {}) {
   if (runState.running) return false;
@@ -91,6 +93,7 @@ export function startAiRun({ trigger } = {}) {
     autoApproved: 0,
     opened: 0,
     demo: false,
+    news: null,
     trigger: trig,
   });
   (async () => {
@@ -123,8 +126,14 @@ export function startAiRun({ trigger } = {}) {
       recordPicks(runId, scan.picks);
       log(`scanner bot ${scan.model} → ${scan.picks.length} picks (${lap()})`);
       store.addLog({ level: 'info', message: `scanner bot (${scan.source}, ${scan.model}) → ${scan.picks.length} picks` });
+      // News & earnings: OPTIONAL context. Never throws; when it cannot run the trader still runs (without notes) and the record says why.
+      runState.stage = 'news';
+      const newsRes = await runNewsStage(scan.picks, { runId });
+      addUsage(newsRes.usage);
+      runState.news = newsRes.news;
+      log(`news bot → ${newsRes.news.status}${newsRes.news.reason && newsRes.news.status !== 'ok' ? ` (${newsRes.news.reason})` : ''} (${lap()})`);
       runState.stage = 'trading';
-      const trades = await runTraderBot(scan.picks, { regime, runId, scannerModel: scan.model });
+      const trades = await runTraderBot(scan.picks, { regime, runId, scannerModel: scan.model, notes: newsRes.notes });
       addUsage(trades.usage);
       runState.proposals = trades.proposalCount;
       runState.autoApproved = trades.autoApproved.length;
@@ -146,6 +155,8 @@ export function startAiRun({ trigger } = {}) {
         proposalCount: trades.proposalCount, // how many became pending proposals after the risk engine
         autoApproved: trades.autoApproved.length,
         proposals: trades.proposals.map(compact),
+        newsBlocked: (trades.newsBlocked || []).map(compact), // proposals the news guard auto-rejected (earnings blackout / blocking risk flag)
+        news: runState.news,
         note: trades.note || '',
         rejected: trades.skippedList || [],
         adjusted: trades.adjustedList || [],
@@ -166,7 +177,7 @@ export function startAiRun({ trigger } = {}) {
       store.addLog({ level: runState.stage === 'blocked' ? 'warn' : 'error', message: `AI run ${runState.stage} (${code}): ${err.message}` });
       // Failed runs go to history only, so /ai/summary keeps the last good run; previous picks/proposals/positions are untouched.
       saveRun(
-        { runId, at: new Date().toISOString(), status: runState.stage, code, durationMs: Date.now() - t0, error: err.message, picks: runState.picks, proposalCount: 0, proposals: [], trades: [], rejected: [], demo: runState.demo, trigger: trig, costUsd: usage.costUsd, aiCalls: usage.calls },
+        { runId, at: new Date().toISOString(), status: runState.stage, code, durationMs: Date.now() - t0, error: err.message, picks: runState.picks, proposalCount: 0, proposals: [], trades: [], rejected: [], demo: runState.demo, news: runState.news, trigger: trig, costUsd: usage.costUsd, aiCalls: usage.calls },
         { latest: false },
       );
     } finally {

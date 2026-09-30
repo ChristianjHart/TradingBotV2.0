@@ -52,10 +52,10 @@ export function patchProposal(id, patch) {
  * Store the proposals of one run. `items` are fully sized trades (see traderBot). Older still-pending proposals for the SAME
  * symbols become 'superseded'. Returns the stored proposals.
  */
-export function createProposals({ runId, items, source, models, ttlHours }) {
+export function createProposals({ runId, items, blocked = [], source, models, ttlHours }) {
   const ttl = Number(ttlHours) > 0 ? Number(ttlHours) : store.getSettings().proposalTtlHours || config.ai.proposalTtlHours;
   const now = Date.now();
-  const created = items.map((t) => ({
+  const toRow = (t, blockReason) => ({
     id: `prop_${runId}_${t.symbol.replace(/\W/g, '')}`,
     runId,
     bot: 'trader',
@@ -81,7 +81,13 @@ export function createProposals({ runId, items, source, models, ttlHours }) {
     rejectReason: null,
     riskCheck: t.riskCheck,
     shadow: null,
-  }));
+    // News & earnings context (validated note; null when the news stage did not produce one for this symbol).
+    notes: t.note ?? null,
+    riskFlags: t.note?.riskFlags ?? [],
+    earningsInDays: t.note?.earningsInDays ?? null,
+    ...(blockReason ? { status: 'rejected', decidedAt: iso(now), decidedBy: 'system', rejectReason: blockReason } : {}),
+  });
+  const created = [...items.map((t) => toRow(t)), ...blocked.map((t) => toRow(t, t.blockReason))];
   const syms = new Set(created.map((p) => p.symbol));
   const all = store.getProposals();
   const changed = [];

@@ -7,12 +7,12 @@ import { signupState } from './policy.js';
 import { peekCatalog, FREE_MODEL_NOTES } from '../services/catalog.js';
 
 const state = { unreadable: false };
-const FIELDS = ['openrouterKey', 'alpacaKey', 'alpacaSecret'];
+const FIELDS = ['openrouterKey', 'alpacaKey', 'alpacaSecret', 'finnhubKey'];
 
 /** Decrypt the owner's stored keys/models and make them the active credentials (env vars remain the fallback). */
 export function applyOwnerCredentials() {
   const owner = usersRepo.owner();
-  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', scannerModel: '', traderModel: '', newsModel: '' };
+  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
   state.unreadable = false;
   if (owner) {
     next.scannerModel = owner.models?.scannerModel || '';
@@ -48,6 +48,7 @@ export function accountSummary(user) {
     createdAt: shown?.created_at ?? null,
     keys: {
       openrouter: { set: src.openrouter !== 'none', source: src.openrouter, last4: last4(c.openrouter.key) },
+      finnhub: { set: src.finnhub !== 'none', source: src.finnhub, last4: last4(c.finnhub.key) },
       alpaca: { set: src.alpaca !== 'none', source: src.alpaca, keyLast4: last4(c.alpaca.key), secretSet: Boolean(c.alpaca.secret) },
     },
     models: { scanner: c.openrouter.scannerModel, trader: c.openrouter.traderModel, news: c.openrouter.newsModel, defaults: { scanner: defaults.scannerModel, trader: defaults.traderModel, news: defaults.newsModel } },
@@ -66,13 +67,13 @@ function cleanKey(name, v) {
   return { value: t };
 }
 
-/** Body: {openrouterKey?, alpacaKey?, alpacaSecret?, clear?:['openrouter'|'alpaca']}. Returns {error,status,code} or {ok}. */
+/** Body: {openrouterKey?, alpacaKey?, alpacaSecret?, finnhubKey?, clear?:['openrouter'|'alpaca'|'finnhub']}. Returns {error,status,code} or {ok}. */
 export async function saveKeys(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 400, error: 'body must be a JSON object' };
   const owner = usersRepo.owner();
   if (!owner) return { status: 409, code: 'no_account', error: 'create an account first' };
   const clear = body.clear ?? [];
-  if (!Array.isArray(clear) || clear.some((c) => c !== 'openrouter' && c !== 'alpaca')) return { status: 400, error: "clear must be an array of 'openrouter' and/or 'alpaca'" };
+  if (!Array.isArray(clear) || clear.some((c) => c !== 'openrouter' && c !== 'alpaca' && c !== 'finnhub')) return { status: 400, error: "clear must be an array of 'openrouter', 'alpaca' and/or 'finnhub'" };
   const incoming = {};
   for (const f of FIELDS) {
     if (body[f] === undefined || body[f] === null || body[f] === '') continue;
@@ -85,8 +86,9 @@ export async function saveKeys(body) {
     return { status: 409, code: 'encryption_not_configured', error: 'APP_SECRET is not configured on the server, so API keys cannot be stored. Set APP_SECRET (a long random string) and restart.' };
   }
   const cur = getAccountCredentials();
-  const next = { openrouterKey: cur.openrouterKey, alpacaKey: cur.alpacaKey, alpacaSecret: cur.alpacaSecret };
+  const next = { openrouterKey: cur.openrouterKey, alpacaKey: cur.alpacaKey, alpacaSecret: cur.alpacaSecret, finnhubKey: cur.finnhubKey };
   if (clear.includes('openrouter')) next.openrouterKey = '';
+  if (clear.includes('finnhub')) next.finnhubKey = '';
   if (clear.includes('alpaca')) Object.assign(next, { alpacaKey: '', alpacaSecret: '' });
   Object.assign(next, incoming);
   if (!Object.keys(incoming).length && !clearing) return { status: 400, error: 'nothing to save' };

@@ -24,11 +24,12 @@ const envCred = {
   alpacaKey: process.env.ALPACA_API_KEY || '',
   alpacaSecret: process.env.ALPACA_API_SECRET || '',
   openrouterKey: envAny('OPENROUTER_API_KEY'),
+  finnhubKey: envAny('FINNHUB_API_KEY'),
   scannerModel: process.env.SCANNER_MODEL || 'deepseek/deepseek-v3.1-terminus',
   traderModel: process.env.TRADER_MODEL || 'deepseek/deepseek-chat-v3.1',
-  newsModel: process.env.NEWS_MODEL || 'deepseek/deepseek-chat-v3.1', // reserved for the later news/earnings bot (stored, unused yet)
+  newsModel: process.env.NEWS_MODEL || 'deepseek/deepseek-chat-v3.1', // the news & earnings bot (optional context stage of a run)
 };
-const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', scannerModel: '', traderModel: '', newsModel: '' };
+const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
 const credListeners = new Set();
 let mockOverride = null; // test hook / explicit override; null = read USE_MOCK_DATA at call time
 
@@ -59,6 +60,7 @@ export function credentialSource() {
   const envAlpaca = Boolean(envCred.alpacaKey && envCred.alpacaSecret);
   return {
     openrouter: acctCred.openrouterKey ? 'account' : envCred.openrouterKey ? 'env' : 'none',
+    finnhub: acctCred.finnhubKey ? 'account' : envCred.finnhubKey ? 'env' : 'none',
     alpaca: acctAlpaca() ? 'account' : envAlpaca ? 'env' : 'none',
   };
 }
@@ -66,7 +68,7 @@ export function credentialSource() {
 /** Remove every active secret from a string (error text from upstream must never reach logs verbatim). */
 export function scrubSecrets(text) {
   let out = String(text ?? '');
-  for (const v of [acctCred.alpacaKey, acctCred.alpacaSecret, acctCred.openrouterKey, envCred.alpacaKey, envCred.alpacaSecret, envCred.openrouterKey]) {
+  for (const v of [acctCred.alpacaKey, acctCred.alpacaSecret, acctCred.openrouterKey, acctCred.finnhubKey, envCred.alpacaKey, envCred.alpacaSecret, envCred.openrouterKey, envCred.finnhubKey]) {
     if (v && v.length >= 6) out = out.split(v).join('[redacted]');
   }
   return out;
@@ -140,6 +142,20 @@ export const config = {
       envCred.newsModel = v;
     },
   },
+  finnhub: {
+    get key() {
+      return acctCred.finnhubKey || envCred.finnhubKey;
+    },
+    set key(v) {
+      envCred.finnhubKey = v;
+    },
+  },
+  /** News & earnings stage. MOCK_NEWS=true (dev/test only) stubs the Alpaca-news + Finnhub clients; honoured only via mockNewsEnabled(). */
+  news: {
+    get mockRequested() {
+      return isTrue(envAny('MOCK_NEWS'));
+    },
+  },
   /** AI spend governor + dev fixtures. Read at call time so they can be changed (and tested) without re-importing. */
   ai: {
     /** Monthly hard cap in USD (env default; the `monthlyAiBudgetUsd` setting overrides it). */
@@ -188,4 +204,8 @@ export function hasAlpacaCredentials() {
 
 export function hasOpenRouterKey() {
   return Boolean(config.openrouter.key);
+}
+
+export function hasFinnhubKey() {
+  return Boolean(config.finnhub.key);
 }

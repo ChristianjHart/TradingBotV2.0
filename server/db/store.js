@@ -54,6 +54,8 @@ const defaults = {
     proposalTtlHours: config.ai.proposalTtlHours, // a pending proposal expires after this many hours
     autoApprove: false, // OFF by default: nothing is ever opened without an explicit approval unless the owner flips this
     autoApproveMaxAllocPct: 5, // auto-approval only for proposals whose allocation is <= this % of equity
+    // News & earnings bot (optional context stage; see services/newsNotes.js). Earnings within `earningsBlackoutDays` => proposal auto-rejected.
+    news: { enabled: true, maxSymbols: 30, earningsBlackoutDays: 2, allowEarningsTrades: false, blockingFlags: ['halt', 'legal'] },
     // AI spend governor (USD per UTC calendar month, all bots).
     monthlyAiBudgetUsd: config.ai.monthlyBudgetUsd,
     // netEdge = realizedPnl - drawdownWeight x maxDrawdownUsd + avoidedWeight x avoidedLoss
@@ -85,6 +87,7 @@ const files = {
   proposals: path.join(config.dataDir, 'proposals.json'),
   aiSpend: path.join(config.dataDir, 'ai-spend.json'),
   scheduleState: path.join(config.dataDir, 'schedule-state.json'),
+  research: path.join(config.dataDir, 'research-notes.json'),
 };
 
 export const MAX_POSITIONS = 1000;
@@ -234,6 +237,14 @@ export const store = {
       keep = data.filter((p) => p.status === 'pending' || seen++ < room);
     }
     put('proposals', files.proposals, keep);
+  },
+
+  /** News & earnings research notes (newest first): [{id, runId, at, model, symbol, sentiment, catalyst, earningsInDays, riskFlags, summary, sources}]. */
+  getResearch() {
+    return cached('research', files.research, []);
+  },
+  setResearch(data) {
+    put('research', files.research, data.slice(0, 3000));
   },
 
   /** AI call ledger [{id, ts, bot, model, promptTokens, completionTokens, costUsd, costSource, ok, runId}], ascending by ts. */

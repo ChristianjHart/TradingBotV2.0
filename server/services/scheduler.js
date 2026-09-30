@@ -3,6 +3,7 @@
 // The AI is required: nothing here has a rule-based fallback; a run that cannot be afforded is SKIPPED with a logged reason.
 import { store } from '../db/store.js';
 import { config } from '../config.js';
+import { newsSettings } from './newsNotes.js';
 import { alpaca } from './alpaca.js';
 import { startAiRun, runState, aiStatus } from './aiRun.js';
 import { NYSE_HOLIDAYS, NYSE_HALF_DAYS, usMarketOpen } from './market.js';
@@ -186,20 +187,31 @@ const r6 = (n) => Math.round(n * 1e6) / 1e6;
  * calls and failed runs excluded); else estimated from the selected models' catalog prices x token profile; 'unknown' when a
  * selected model has no price (usd null; gatingUsd still uses the conservative fallback price so budget checks stay safe).
  */
-export function estimateRunCost() {
+export function estimateRunCost(settings = store.getSettings()) {
+  const newsOn = newsSettings(settings).enabled;
   const byRun = new Map();
   for (const e of store.getSpend()) {
     if (!e.runId || e.mock) continue;
-    const r = byRun.get(e.runId) || { usd: 0, bots: new Set(), ok: true };
-    r.usd += e.costUsd || 0;
+    const r = byRun.get(e.runId) || { usd: 0, newsUsd: 0, bots: new Set(), ok: true };
+    if (e.bot === 'news') r.newsUsd += e.costUsd || 0;
+    else r.usd += e.costUsd || 0; // scanner + trader (+ other) only: the news call is added below when the stage is enabled
     r.bots.add(e.bot);
     if (!e.ok) r.ok = false;
     byRun.set(e.runId, r);
   }
-  const full = [...byRun.values()].filter((r) => r.ok && r.bots.has('scanner') && r.bots.has('trader')).slice(-20);
+  const all = [...byRun.values()];
+  const full = all.filter((r) => r.ok && r.bots.has('scanner') && r.bots.has('trader')).slice(-20);
+  // One news call per run when the stage is enabled: measured from recent runs that had one, else from the model's price x token profile.
+  const newsRuns = all.filter((r) => r.ok && r.bots.has('news')).slice(-20);
+  const newsModel = config.openrouter.newsModel;
+  const newsPrice = priceOf(newsModel);
+  const newsTok = tokenProfile('news');
+  const newsEst = newsRuns.length ? { usd: r6(newsRuns.reduce((s, r) => s + r.newsUsd, 0) / newsRuns.length), gating: r6(newsRuns.reduce((s, r) => s + r.newsUsd, 0) / newsRuns.length) } : { usd: newsPrice ? costFromTokens(newsPrice, newsTok.prompt, newsTok.completion) : null, gating: costFromTokens(newsPrice || FALLBACK_PRICE, newsTok.prompt, newsTok.completion) };
+  const news = { enabled: newsOn, usd: newsOn ? newsEst.usd : 0, basis: newsRuns.length ? 'measured' : newsPrice ? 'estimated' : 'unknown' };
   if (full.length) {
     const usd = r6(full.reduce((s, r) => s + r.usd, 0) / full.length);
-    return { usd, gatingUsd: usd, basis: 'measured', samples: full.length };
+    const extra = newsOn ? newsEst.usd ?? newsEst.gating : 0; // measured base + a conservative news estimate when the news model has no known price
+    return { usd: r6(usd + extra), gatingUsd: r6(usd + (newsOn ? newsEst.gating : 0)), basis: 'measured', samples: full.length, news };
   }
   const models = { scanner: config.openrouter.scannerModel, trader: config.openrouter.traderModel };
   let total = 0;
@@ -212,7 +224,12 @@ export function estimateRunCost() {
     total += price ? costFromTokens(price, tok.prompt, tok.completion) : 0;
     gating += costFromTokens(price || FALLBACK_PRICE, tok.prompt, tok.completion);
   }
-  return known ? { usd: r6(total), gatingUsd: r6(gating), basis: 'estimated', samples: 0 } : { usd: null, gatingUsd: r6(gating), basis: 'unknown', samples: 0 };
+  if (newsOn) {
+    if (newsEst.usd === null) known = false;
+    total += newsEst.usd ?? 0;
+    gating += newsEst.gating;
+  }
+  return known ? { usd: r6(total), gatingUsd: r6(gating), basis: 'estimated', samples: 0, news } : { usd: null, gatingUsd: r6(gating), basis: 'unknown', samples: 0, news };
 }
 
 // ---------- forecast ----------
@@ -238,6 +255,7 @@ export function forecastForPlan(plan, { now = Date.now(), cost = estimateRunCost
   if (eventRunsAssumed) notes.push(`${eventRunsAssumed} event-triggered runs/month assumed (estimate; capped by maxEventRunsPerDay and the cooldown)`);
   else if (plan === 'D') notes.push('D has no event triggers: its 3 fixed slots already cover the day');
   notes.push(cost.basis === 'measured' ? `cost per run measured from ${cost.samples} recent full run(s)` : cost.basis === 'estimated' ? 'cost per run ESTIMATED from model prices x default token sizes (no measured runs yet)' : 'cost per run unknown: a selected model has no known price (catalog not loaded?)');
+  if (cost.news?.enabled) notes.push(`each run includes one news-bot call (${cost.news.usd === null ? 'price unknown' : `$${cost.news.usd} ${cost.news.basis}`})`);
   return {
     plan,
     label: PLAN_LABELS[plan],
@@ -253,7 +271,7 @@ export function forecastForPlan(plan, { now = Date.now(), cost = estimateRunCost
 }
 
 export function forecast({ plan, now = Date.now(), settings = store.getSettings() } = {}) {
-  const cost = estimateRunCost();
+  const cost = estimateRunCost(settings);
   const cur = scheduleOf(settings);
   const list = plan ? [plan] : PLANS;
   return {
@@ -262,6 +280,7 @@ export function forecast({ plan, now = Date.now(), settings = store.getSettings(
     capUsd: budgetCapUsd(),
     estCostPerRunUsd: cost.usd,
     basis: cost.basis,
+    newsIncluded: Boolean(cost.news?.enabled),
     plans: list.map((p) => forecastForPlan(p, { now, cost, settings })),
   };
 }

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { config, credentialSource, scrubSecrets } from '../config.js';
+import { pingFinnhub } from '../services/finnhub.js';
 import { store } from '../db/store.js';
 import { usersRepo } from '../db/users.js';
 import { asyncHandler, clientKey } from '../middleware.js';
@@ -188,10 +189,19 @@ accountRouter.put('/models', asyncHandler(async (req, res) => {
 
 accountRouter.post('/test', asyncHandler(async (req, res) => {
   const service = req.body?.service;
-  if (service !== 'openrouter' && service !== 'alpaca') return res.status(400).json({ error: "service must be 'openrouter' or 'alpaca'" });
+  if (service !== 'openrouter' && service !== 'alpaca' && service !== 'finnhub') return res.status(400).json({ error: "service must be 'openrouter', 'alpaca' or 'finnhub'" });
   const src = credentialSource()[service];
   if (src === 'none') return res.json({ ok: false, message: 'no key configured' });
-  const label = service === 'openrouter' ? 'OpenRouter' : 'Alpaca';
+  const label = service === 'openrouter' ? 'OpenRouter' : service === 'finnhub' ? 'Finnhub' : 'Alpaca';
+  if (service === 'finnhub') {
+    try {
+      await pingFinnhub(); // one minimal real call; the key travels in the X-Finnhub-Token header only
+      return res.json({ ok: true, message: `Finnhub accepted the ${src === 'account' ? 'account' : 'environment'} key` });
+    } catch (err) {
+      const msg = err?.code === 'key_rejected' ? `Finnhub: key rejected (HTTP ${err.status})` : err?.code === 'timeout' ? 'Finnhub: request timed out' : err?.code === 'rate_limited' ? 'Finnhub: rate limited (HTTP 429), try again shortly' : `Finnhub: ${scrubSecrets(err?.message || 'request failed').slice(0, 80)}`;
+      return res.json({ ok: false, message: msg });
+    }
+  }
   try {
     const r =
       service === 'openrouter'

@@ -70,6 +70,9 @@ export function chatReply(content, { prompt = 1000, completion = 500, cost, head
 export function defaultModelReply(body) {
   const sys = body.messages[0].content;
   const input = JSON.parse(body.messages[1].content);
+  if (/news and earnings analyst/.test(sys)) {
+    return { notes: input.untrusted_news_data.map((x) => ({ symbol: x.symbol, sentiment: 0.4, catalyst: 'test catalyst', earningsInDays: x.earningsInDays, riskFlags: [], summary: 'test summary', sources: x.headlines.slice(0, 1).map((h) => ({ id: h.id })) })) };
+  }
   if (/screener/.test(sys)) {
     return {
       picks: input.rows.slice(0, 30).map((r, i) => ({ symbol: r.symbol, direction: i % 2 === 0 || r.symbol.includes('/') ? 'long' : 'short', confidence: 0.8 - i * 0.01, reason: 'test pick' })),

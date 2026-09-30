@@ -32,7 +32,7 @@ Open [http://localhost:3000](http://localhost:3000).
    - **Build:** `npm install`
    - **Start:** `npm start`
    - **Health check:** `/api/health`
-4. `render.yaml` already sets `NODE_VERSION=22`, `TRUST_PROXY=true` and generates `APP_SECRET` for you and declares the secrets (`SIGNUP_CODE`, `ADMIN_TOKEN`, `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) as `sync: false`, so Render asks you for them. **Set `SIGNUP_CODE`** (see *Account login* below) so only you can create the owner account; once an account exists the whole API requires login. Run `supabase/migrations/003_users.sql`, `004_revoked_sessions.sql` and `005_proposals_spend.sql` (in that order, after 001 and 002; or just paste `supabase/setup_all.sql`) if you use Supabase so the account, the proposals and the AI budget survive redeploys.
+4. `render.yaml` already sets `NODE_VERSION=22`, `TRUST_PROXY=true` and generates `APP_SECRET` for you and declares the secrets (`SIGNUP_CODE`, `ADMIN_TOKEN`, `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `OPENROUTER_API_KEY`, `FINNHUB_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) as `sync: false`, so Render asks you for them. **Set `SIGNUP_CODE`** (see *Account login* below) so only you can create the owner account; once an account exists the whole API requires login. Run `supabase/migrations/003_users.sql`, `004_revoked_sessions.sql` and `005_proposals_spend.sql` and `006_research_notes.sql` (in that order, after 001 and 002; or just paste `supabase/setup_all.sql`) if you use Supabase so the account, the proposals and the AI budget survive redeploys.
 5. Env vars (optional for a first mock-data test — defaults work):
    - `USE_MOCK_DATA=true` for a smoke test with no keys
    - Or set `ALPACA_API_KEY`, `ALPACA_API_SECRET`, and `USE_MOCK_DATA=false` for live scans
@@ -59,7 +59,7 @@ The app is **single-tenant**: one shared dataset and one **owner** account. Flow
 
 1. Set `SIGNUP_CODE` (a long random secret; falls back to `ADMIN_TOKEN`) and `APP_SECRET` (a long random string; `render.yaml` generates it) on the server. **On a deployment `SIGNUP_CODE` is required**: without an account the API is closed (see fail-closed setup below), so there is nothing to sign up with until it is set.
 2. Open the site. It shows the create-account screen: enter email, a password (10+ characters, not a common one) and the sign-up code. You are signed in with an `HttpOnly` `tb_session` cookie (14 days; signed payload `{uid, sv, sid, exp}`; always `Secure` in production / on Render).
-3. Under **Settings → Account** add your OpenRouter key and Alpaca key/secret (and optionally model names). They are stored **encrypted** (AES-256-GCM, key derived from `APP_SECRET`) and are **never returned** by any endpoint (only `set` / `source` / last 4 characters). They take effect immediately and **override** the `OPENROUTER_API_KEY` / `ALPACA_API_*` env vars, which stay as the fallback. Attaching Alpaca keys also switches data to live even if `USE_MOCK_DATA=true`.
+3. Under **Settings → Account** add your OpenRouter key, Alpaca key/secret and (optional, free) Finnhub key (and optionally model names). They are stored **encrypted** (AES-256-GCM, key derived from `APP_SECRET`) and are **never returned** by any endpoint (only `set` / `source` / last 4 characters). They take effect immediately and **override** the `OPENROUTER_API_KEY` / `FINNHUB_API_KEY` / `ALPACA_API_*` env vars, which stay as the fallback. Attaching Alpaca keys also switches data to live even if `USE_MOCK_DATA=true`.
 4. Once an account exists, **every `/api` route except `GET /api/health` and `/api/auth/*` requires the session cookie** (or `Authorization: Bearer <ADMIN_TOKEN>` for scripts). Static files stay public so the SPA can show the login screen.
 
 Rules worth knowing:
@@ -96,10 +96,11 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 |---|---|---|
 | GET | `/api/auth/status` | Public: `{required, setupRequired, signupOpen, signupNeedsCode, mode ('session'\|'token'\|'none'\|'setup'), user, guidance?}` |
 | POST | `/api/auth/signup` \| `/login` \| `/logout` \| `/logout-all` \| `/password` | Account session management (`signup` body `{email,password,code}`, `password` body `{current,next}`) |
+| GET | `/api/research`, `/api/research/latest` | News bot notes (`?runId=&symbol=&limit=`) / latest note per symbol; see *News & earnings bot* |
 | GET | `/api/account` | Email, key summary (`set`/`source`/last 4 only), models, `encryptionReady` |
-| PUT | `/api/account/keys` | `{openrouterKey?, alpacaKey?, alpacaSecret?, clear?:['openrouter'\|'alpaca']}` |
-| PUT | `/api/account/models` | `{scannerModel?, traderModel?, newsModel?}` (empty string = default; `newsModel` is stored for the later news bot). Ids are validated (`[A-Za-z0-9_.-:/]`, max 100) and, when the catalog is loaded, against it: unknown ids are saved but returned in `warnings`; free models add `notes`. Response = account summary + `warnings` + `notes` |
-| POST | `/api/account/test` | `{service:'openrouter'\|'alpaca'}` → `{ok, message}` (real minimal call with the active key) |
+| PUT | `/api/account/keys` | `{openrouterKey?, alpacaKey?, alpacaSecret?, finnhubKey?, clear?:['openrouter'\|'alpaca'\|'finnhub']}` |
+| PUT | `/api/account/models` | `{scannerModel?, traderModel?, newsModel?}` (empty string = default; `newsModel` is the news bot's model). Ids are validated (`[A-Za-z0-9_.-:/]`, max 100) and, when the catalog is loaded, against it: unknown ids are saved but returned in `warnings`; free models add `notes`. Response = account summary + `warnings` + `notes` |
+| POST | `/api/account/test` | `{service:'openrouter'\|'alpaca'\|'finnhub'}` → `{ok, message}` (real minimal call with the active key) |
 | POST | `/api/run` | Start scanner → trader run (→ proposals). 409 `worker_not_running` while stopped |
 | GET | `/api/run/status` | Progress of the current run |
 | GET | `/api/runs?limit=20` | Persisted run history (`status`, `code`, `error`, `proposalCount`, `costUsd`) |
@@ -131,7 +132,7 @@ npm test            # node:test unit tests (CI runs these + syntax checks)
 npm run prune       # delete Supabase log rows older than 14 days (-- --days N)
 ```
 
-Run `supabase/migrations/001_init.sql`, `002_runs.sql` (runs, equity snapshots, pick scores, `prune_logs()`) then `003_users.sql` (`app_users`: the owner account and its encrypted keys; without Supabase they live in `data/users.json`) `004_revoked_sessions.sql` (logged-out sessions, so a stolen cookie stays dead after a redeploy) and `005_proposals_spend.sql` (`proposals` approval queue + `ai_spend` ledger; each is optional and the server tolerates them missing, but the budget is only exact across redeploys with them).
+Run `supabase/migrations/001_init.sql`, `002_runs.sql` (runs, equity snapshots, pick scores, `prune_logs()`) then `003_users.sql` (`app_users`: the owner account and its encrypted keys; without Supabase they live in `data/users.json`) `004_revoked_sessions.sql` (logged-out sessions, so a stolen cookie stays dead after a redeploy) and `005_proposals_spend.sql` (`proposals` approval queue + `ai_spend` ledger) and `006_research_notes.sql` (`research_notes`: the news bot's notes; each is optional and the server tolerates them missing, but the budget is only exact across redeploys with them).
 
 ## Stack
 
@@ -210,13 +211,34 @@ Every proposal is scored when its horizon passes (`horizonHours`), whether you a
 
 `MOCK_LLM=true` swaps OpenRouter for a deterministic canned reply (scanner: the first ~20 symbols alternating long/short; trader: the top 3 candidates) so screenshots and tests run with no key. It is a test fixture, never a fallback: it is **refused** (ignored, with a loud warning) when `NODE_ENV=production` or `RENDER` is set, it is never used automatically, costs nothing, and everything it produces is labelled `source: 'demo'` / `model: 'mock-llm'` (`/api/status` → `ai.demo`, `/api/health` → `mockLlm`) so the UI can show **DEMO DATA**.
 
+### News & earnings bot (optional context stage)
+
+A third bot, `news`, runs between the scanner and the trader: **fetch → scanner → news (shortlist only) → trader**. It never trades and is **optional context**: if it cannot run the run continues without notes and the run record says why. There is **no rule-based trading fallback**; the AI trader is still required.
+
+- **Shortlist**: the top `news.maxSymbols` (default 30) scanner picks by confidence (minus open positions and crypto shorts). For each: up to 8 headlines from the last 48 h (Alpaca News, `GET https://data.alpaca.markets/v1beta1/news`, the same Alpaca credentials as market data; de-duplicated, each truncated to 300 chars) and the next earnings date (Finnhub `GET https://finnhub.io/api/v1/calendar/earnings`; crypto has none).
+- **Finnhub key** (free plan is enough): Settings → Account (`PUT /api/account/keys {finnhubKey}`, encrypted like the other keys, never returned: only `{set, source:'account'|'env'|'none', last4}`) or env `FINNHUB_API_KEY`. It is sent **only** in the `X-Finnhub-Token` header, never in a URL or log. `POST /api/account/test {service:'finnhub'}` makes one minimal real call. `PUT /api/account/keys {clear:['finnhub']}` removes it. Without a key the news stage still runs on headlines alone and the run's `news.status` is `partial` ("earnings dates unknown").
+- **Model and cost**: `settings`/account `newsModel` (env `NEWS_MODEL`, default `deepseek/deepseek-chat-v3.1`). Its calls are ledgered under bot `news` and obey the same $20/month governor (`GET /api/budget` → `byBot.news`); the news call is skipped, not the trader, when the remaining budget cannot cover both. The schedule forecast (`/api/schedule/forecast`, `estCostPerRunUsd`) includes one news call per run while `news.enabled` is true.
+- **Output** (strictly validated; anything outside the schema is dropped): `{notes:[{symbol, sentiment:-1..1, catalyst(<=200), earningsInDays:number|null, riskFlags:[earnings_imminent|guidance_risk|legal|regulatory|halt|offering|macro|rumor|low_confidence], summary(<=300), sources:[{title,url,publishedAt}]}]}`. Every source must be one of the headlines that were supplied (hallucinated ones are dropped; a note citing none is dropped unless its earnings date is known). `earningsInDays` is the **calendar's** value, never the model's.
+- **Untrusted text**: headlines are scraped third-party text. They are stripped of HTML/markdown/URLs/control characters and instruction-like phrases, size-capped, and only ever sent inside a JSON data block that the system prompt declares to be data, not instructions. The trader receives **only** `sentiment`, `earningsInDays` and `riskFlags` (never free text). Notes are stored as plain text (the UI must still escape them; `sources[].url` is http(s) only).
+- **Server-side guard**: a proposal whose symbol has `earningsInDays <= news.earningsBlackoutDays` (default 2) is created already **rejected** with `rejectReason: 'earnings blackout'` (`decidedBy: 'system'`; it consumes no slot or cash and is shadow-scored like any rejection) unless `news.allowEarningsTrades` is true. Notes whose `riskFlags` intersect `news.blockingFlags` (default `['halt','legal']`) are rejected with `news risk flag: <flag>`. Proposals carry `notes`, `riskFlags`, `earningsInDays`.
+- **Settings**: `news: {enabled:true, maxSymbols:30 (1-60), earningsBlackoutDays:2 (0-10), allowEarningsTrades:false, blockingFlags:['halt','legal'] (subset of the flag enum)}` via `PATCH /api/settings {news:{...}}` (partial, validated, unknown fields → 400).
+- **Run record** `news: {status:'ok'|'partial'|'skipped'|'error', reason, symbols, headlines, earningsKnown, costUsd, notes, model?}` on `/api/status` → `run.news`, `/api/runs`, `/api/ai/summary`; proposals rejected by the guard are listed in the run's `newsBlocked`. While it runs `run.stage` is `news`. Reasons include: turned off, no Alpaca credentials, no Finnhub key, no headlines, budget kept for the trader, AI error code.
+- **Research endpoints**: `GET /api/research?runId=&symbol=&limit=` (newest first) and `GET /api/research/latest` (latest note per symbol); notes persist in `data/research-notes.json` and Supabase `research_notes` (migration 006).
+- Upstream calls use fixed host allow-lists (`data.alpaca.markets`, `finnhub.io`), 10 s timeouts, at most 3 attempts with backoff on 429/5xx and small caches (news 10 min, earnings 6 h).
+
+### Dev/test only: `MOCK_NEWS`
+
+`MOCK_NEWS=true` stubs the Alpaca-news and Finnhub clients with deterministic headlines and earnings dates (and `MOCK_LLM` answers the news bot with canned notes, including an `earnings_imminent` case), so the whole pipeline runs with no keys. Like `MOCK_LLM` it is **refused** (ignored, loud warning, logged) when `NODE_ENV=production` or `RENDER` is set (`/api/health` → `mockNews`).
+
 ### Environment variables added
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `MONTHLY_AI_BUDGET_USD` | `20` | Hard monthly cap on AI spend (also editable in Settings) |
 | `PROPOSAL_TTL_HOURS` | `6` | Default proposal lifetime (setting `proposalTtlHours`) |
-| `NEWS_MODEL` | `deepseek/deepseek-chat-v3.1` | Reserved for the later news/earnings bot (stored, unused) |
+| `NEWS_MODEL` | `deepseek/deepseek-chat-v3.1` | Model of the news & earnings bot (overridable under Settings) |
+| `FINNHUB_API_KEY` | unset | Free Finnhub key for earnings dates (fallback; the account key overrides it) |
+| `MOCK_NEWS` | unset | Dev/test canned headlines/earnings; refused in production/Render |
 | `MOCK_LLM` | unset | Dev/test canned LLM; refused in production/Render |
 
 ## Operational notes

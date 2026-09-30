@@ -77,6 +77,18 @@ export async function hydrateProposalsAndSpend() {
     else console.warn(`[supabase] proposals restore failed: ${err.message}`);
   }
   try {
+    if (!store.getResearch().length) {
+      const rows = await select('research_notes', 'select=raw&order=at.desc&limit=1000');
+      if (rows.length) {
+        store.setResearch(rows.map((r) => r.raw).filter(Boolean));
+        store.addLog({ level: 'info', message: `restored ${rows.length} research note(s) from Supabase` });
+      }
+    }
+  } catch (err) {
+    if (tableMissing(err)) console.warn('[supabase] table public.research_notes does not exist — run supabase/setup_all.sql (migration 006). News research notes are kept only on this server\'s disk until then.');
+    else console.warn(`[supabase] research notes restore failed: ${err.message}`);
+  }
+  try {
     const r = await rebuildSpendFromRemote(select);
     if (r.added) store.addLog({ level: 'info', message: `restored ${r.added} AI spend row(s) for this month from Supabase (${r.source})` });
     if (r.source === 'none' || r.source === 'ai_logs') console.warn('[supabase] table public.ai_spend is missing — run supabase/setup_all.sql (migration 005); the budget is being rebuilt from ai_logs.usage in the meantime.');

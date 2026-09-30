@@ -71,6 +71,28 @@ function traderReply(input) {
   return { summary: 'DEMO DATA: the mock LLM proposed the top candidates. This is a test fixture, not a real analysis.', trades };
 }
 
+function newsReply(input) {
+  const items = (Array.isArray(input?.untrusted_news_data) ? input.untrusted_news_data : []).filter((x) => x && typeof x.symbol === 'string');
+  const imminent = items.findIndex((x) => Number.isFinite(x.earningsInDays) && x.earningsInDays <= 2);
+  const flagAt = imminent >= 0 ? -1 : 0; // guarantee one earnings_imminent case even when no symbol has a near date
+  const notes = items.slice(0, 40).map((x, i) => {
+    let h = 0;
+    for (const ch of x.symbol) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const days = Number.isFinite(x.earningsInDays) ? x.earningsInDays : null;
+    const first = Array.isArray(x.headlines) ? x.headlines[0] : null;
+    return {
+      symbol: x.symbol,
+      sentiment: rnd2(((h % 21) - 10) / 10),
+      catalyst: 'DEMO DATA: canned catalyst from the mock LLM',
+      earningsInDays: days,
+      riskFlags: (days !== null && days <= 2) || i === flagAt ? ['earnings_imminent'] : [],
+      summary: 'DEMO DATA: canned news summary from the mock LLM (not a real analysis)',
+      sources: first ? [{ id: first.id }] : [],
+    };
+  });
+  return { notes };
+}
+
 /** Deterministic canned "completion" for a bot, derived from the prompt input. Returns { content, usage } like a real reply. */
 export function mockChat({ bot, user }) {
   let input = null;
@@ -79,7 +101,7 @@ export function mockChat({ bot, user }) {
   } catch {
     /* canned reply with empty input */
   }
-  const out = bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : { items: [] };
+  const out = bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : bot === 'news' ? newsReply(input) : { items: [] };
   const content = JSON.stringify(out);
   return { content, usage: { prompt_tokens: Math.ceil(String(user).length / 4), completion_tokens: Math.ceil(content.length / 4), cost: 0 } };
 }
