@@ -93,7 +93,7 @@ export function tickRun() {
 
 export async function startRun() {
   try {
-    const res = await api('/run', { method: 'POST' });
+    const res = await api('/run', { method: 'POST', body: '{}' });
     state.runLocal = res.started !== false;
     if (!state.runLocal) toast('A run is already in progress — following it.', 'info');
     state.run = { ...(state.run || {}), ...res, running: true, stage: res.stage || 'fetching', startedAt: res.startedAt || new Date().toISOString() };

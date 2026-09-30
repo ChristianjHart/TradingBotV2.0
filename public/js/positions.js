@@ -323,7 +323,7 @@ function closeFailMessage(e, symbol) {
 /** POST a close; on a stale-quote 409 offer "Close anyway", which retries with ?force=1. Returns the response or null if not closed. */
 async function closeWithStaleGuard(path, symbol) {
   try {
-    return await api(path, { method: 'POST' });
+    return await api(path, { method: 'POST', body: '{}' });
   } catch (e) {
     if (e.status === 409 && e.stale) {
       const force = await confirmDialog({
@@ -336,7 +336,7 @@ async function closeWithStaleGuard(path, symbol) {
         toast(`Close cancelled — stale quote for ${symbol || 'position'}.`, 'warn');
         return null;
       }
-      return api(`${path}${path.includes('?') ? '&' : '?'}force=1`, { method: 'POST' });
+      return api(`${path}${path.includes('?') ? '&' : '?'}force=1`, { method: 'POST', body: '{}' });
     }
     throw e;
   }

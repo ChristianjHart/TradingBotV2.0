@@ -9,6 +9,9 @@ import { confirmDialog, toast, tokenDialog } from './ui.js';
 export function setWorkerUI(worker) {
   const dot = $('worker-dot');
   if (!worker || !dot) return;
+  const stopped = worker.status === 'stopped' || worker.status === 'killed';
+  if ($('btn-start')) $('btn-start').hidden = !stopped;
+  if ($('btn-stop')) $('btn-stop').hidden = stopped;
   const label = `worker ${worker.status || 'unknown'}`;
   [['worker-dot', 'worker-label'], ['worker-dot-m', 'worker-label-m']].forEach(([d, l]) => {
     const el = $(d);
@@ -80,7 +83,7 @@ export async function authClick() {
 export function bindChrome() {
   $('btn-stop').addEventListener('click', async () => {
     try {
-      await api('/worker/stop', { method: 'POST' });
+      await api('/worker/stop', { method: 'POST', body: '{}' });
       toast('Worker stopped', 'info');
       await refresh();
       hooks.patchCurrent();
@@ -88,10 +91,20 @@ export function bindChrome() {
       toast(`Stop failed: ${e.message}`, 'error');
     }
   });
+  $('btn-start').addEventListener('click', async () => {
+    try {
+      await api('/worker/start', { method: 'POST', body: '{}' });
+      toast('Worker started', 'success');
+      await refresh();
+      hooks.patchCurrent();
+    } catch (e) {
+      toast(`Start failed: ${e.message}`, 'error');
+    }
+  });
   $('btn-kill').addEventListener('click', async () => {
     if (!(await confirmDialog({ title: 'Kill the worker?', message: 'This halts all scan and monitoring cycles until the worker is restarted.', confirmText: 'Kill worker', danger: true }))) return;
     try {
-      await api('/worker/kill', { method: 'POST' });
+      await api('/worker/kill', { method: 'POST', body: '{}' });
       toast('Worker killed — all cycles halted', 'warn');
       await refresh();
       hooks.patchCurrent();

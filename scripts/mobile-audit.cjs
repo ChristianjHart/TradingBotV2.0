@@ -425,7 +425,7 @@ async function stubEmpty(page) {
   await page.route('**/api/ai/picks', (r) => json(r, { picks: [], updatedAt: null }));
   await page.route('**/api/ai/summary', (r) => json(r, {}));
   await page.route('**/api/runs*', (r) => json(r, { runs: [] }));
-  await page.route('**/api/performance', (r) => json(r, { equityCurve: [{ t: new Date().toISOString(), equity: 100000 }], winRate: null, closed: 0, wins: 0, avgR: null, maxDrawdownPct: 0, realizedPnl: 0, calibration: [], pickAccuracy: { hits: 0, total: 0 }, byBot: { ai: { closed: 0, winRate: null, pnl: 0 }, rules: { closed: 0, winRate: null, pnl: 0 } } }));
+  await page.route('**/api/performance', (r) => json(r, { equityCurve: [{ t: new Date().toISOString(), equity: 100000 }], winRate: null, closed: 0, wins: 0, avgR: null, maxDrawdownPct: 0, realizedPnl: 0, calibration: [], pickAccuracy: { hits: 0, total: 0 }, byBot: { ai: { closed: 0, winRate: null, pnl: 0 }, demo: { closed: 0, winRate: null, pnl: 0 } } }));
 }
 
 /** Extreme data: 20 positions, 12-digit prices, 300-char reasons, long symbols, long email. */
@@ -454,6 +454,94 @@ async function stubExtreme(page) {
   });
   await page.route('**/api/logs*', (r) => json(r, { logs: Array.from({ length: 40 }, (_, i) => ({ id: `l${i}`, ts: new Date(Date.now() - i * 1000).toISOString(), level: ['info', 'warn', 'error'][i % 3], message: `Something happened with ${'averyveryveryverylongtokenwithoutspaces'.repeat(3)} ${i % 2 ? reason : 'short'}` })) }));
 }
+
+
+/* ---------------- propose-and-approve stubs ---------------- */
+const LONG_MODEL = 'anthropic/claude-with-a-really-long-name-v3.5-sonnet-20251022';
+const LONG_REASON = 'Momentum is strong and volume confirms the breakout above resistance while the sector rotates into risk assets; earnings revisions are positive and implied volatility is falling. '.repeat(2);
+function mkProposals(n = 3) {
+  return Array.from({ length: n }, (_, i) => {
+    const short = i === 1;
+    const entry = i === 0 ? 123456789.12 : 250.5 + i * 13.37;
+    return {
+      id: `prop_x${i}`, runId: 'r1', symbol: i === 1 ? 'BERKSHIREHATHAWAY.B/USDT' : i === 0 ? 'NVDA' : 'IWM', side: short ? 'short' : 'long', allocationUsd: i === 0 ? 1234567 : 4998,
+      entry, entryFill: entry, stopLoss: entry * (short ? 1.03 : 0.97), takeProfit: entry * (short ? 0.94 : 1.06), qty: 10, atrPct: 1.1, confidence: 0.93 - i * 0.1, reason: LONG_REASON,
+      source: i === 2 ? 'demo' : 'ai', models: { scanner: LONG_MODEL, trader: LONG_MODEL }, status: 'pending', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + (i === 0 ? 4 * 60e3 : 5.5 * 3600e3)).toISOString(), secondsLeft: 3600, horizonHours: 24,
+      riskCheck: { ok: i !== 1, grossExposureAfterUsd: 14998, grossExposureAfterPct: 15.2, assetClass: 'equity', classExposureAfterUsd: 14998, classExposureAfterPct: 15.2, group: 'index', riskUsd: 110.9, riskPct: 0.111, limits: { maxGrossPct: 80, maxClassPct: 60, maxPerGroup: 3 }, notes: i === 1 ? ['Group limit: 3 of 3 slots used in index. ' + 'x'.repeat(40)] : [] },
+      shadow: null,
+    };
+  });
+}
+function mkHistory() {
+  const base = (i, status, extra) => ({ ...mkProposals(3)[i % 3], id: `prop_h${i}`, status, decidedAt: new Date(Date.now() - i * 3600e3).toISOString(), decidedBy: 'user', ...extra });
+  return [
+    base(0, 'approved', { positionId: 'pos_gone', shadow: { scoredAt: new Date().toISOString(), hypotheticalPnl: 88.5, hypotheticalPct: 1.8, exitReason: 'take-profit', exitPrice: 1, allocation: 4998, spyPnl: 12.3 } }),
+    base(1, 'rejected', { rejectReason: 'too risky ' + 'because '.repeat(12), shadow: { scoredAt: new Date().toISOString(), hypotheticalPnl: -120.25, hypotheticalPct: -2.4, exitReason: 'stop-loss', exitPrice: 1, allocation: 4998, spyPnl: 5 } }),
+    base(2, 'expired', { decidedBy: 'system', shadow: { scoredAt: new Date().toISOString(), hypotheticalPnl: 64.1, hypotheticalPct: 1.2, exitReason: 'time-exit', exitPrice: 1, allocation: 4998, spyPnl: -3, partial: true } }),
+    base(3, 'superseded', { decidedBy: 'system', shadow: { unscorable: true } }),
+    base(4, 'rejected', { shadow: null }),
+  ];
+}
+const counts = (pending, hist = []) => ({ total: pending.length + hist.length, pending: pending.length, approved: hist.filter((h) => h.status === 'approved').length, rejected: hist.filter((h) => h.status === 'rejected').length, expired: 1, superseded: 1 });
+
+async function patchStatus(page, fn) {
+  await page.route('**/api/status', async (r) => {
+    const res = await r.fetch();
+    const b = await res.json();
+    fn(b);
+    await r.fulfill({ response: res, json: b });
+  });
+}
+async function stubProposals(page, pending = mkProposals(3), hist = mkHistory()) {
+  await page.route('**/api/proposals?*', (r) => {
+    const u = new URL(r.request().url());
+    const st = u.searchParams.get('status');
+    if (st === 'pending') return json(r, { proposals: pending, counts: counts(pending, hist) });
+    return json(r, { proposals: [...pending, ...hist], counts: counts(pending, hist) });
+  });
+  await patchStatus(page, (b) => {
+    b.proposalsPending = pending.length;
+  });
+}
+const BUDGETS = {
+  ok: { capUsd: 20, spentUsd: 3.4567, remainingUsd: 16.54, pct: 17.3, resetsAt: '2026-10-01T00:00:00.000Z', month: '2026-09', byBot: { scanner: { usd: 2.9, calls: 12, promptTokens: 1, completionTokens: 1 }, trader: { usd: 0.5567, calls: 12, promptTokens: 1, completionTokens: 1 }, news: { usd: 0, calls: 0, promptTokens: 0, completionTokens: 0 }, other: { usd: 0, calls: 0, promptTokens: 0, completionTokens: 0 } }, byModel: {}, last7d: [0.2, 0.5, 0, 0.9, 0.4, 0.8, 0.6567].map((usd, i) => ({ day: `2026-09-${24 + i}`, usd })), avgCostPerRun: 0.288, projectedMonthEndUsd: 3.9, estimatedShare: 0, level: 'ok' },
+  warn: { pct: 82.5, spentUsd: 16.5, remainingUsd: 3.5, projectedMonthEndUsd: 24.1, level: 'warn' },
+  blocked: { pct: 100, spentUsd: 20, remainingUsd: 0, projectedMonthEndUsd: 31.2, level: 'blocked' },
+};
+const budgetOf = (lvl) => ({ ...BUDGETS.ok, ...BUDGETS[lvl] });
+async function stubBudget(page, lvl) {
+  const b = budgetOf(lvl);
+  await page.route('**/api/budget', (r) => json(r, b));
+  await patchStatus(page, (st) => {
+    st.budget = { capUsd: b.capUsd, spentUsd: b.spentUsd, remainingUsd: b.remainingUsd, pct: b.pct, level: b.level, resetsAt: b.resetsAt };
+    if (lvl === 'blocked') st.ai = { required: true, ready: false, blockedReason: 'budget_exhausted', demo: false };
+  });
+}
+function mkModels() {
+  const ms = [];
+  ms.push({ id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Meta: Llama 3.3 70B Instruct (free)', promptPerM: 0, completionPerM: 0, contextLength: 131072, isFree: true, supportsJson: true });
+  ms.push({ id: 'mystery/unpriced-model', name: 'Mystery unpriced model with a very long display name that keeps going and going', promptPerM: null, completionPerM: null, contextLength: null, isFree: false });
+  for (let i = 0; i < 60; i++) ms.push({ id: `vendor${i % 7}/model-${i}-with-a-long-identifier${i % 3 ? '' : ':extended'}`, name: `Vendor ${i % 7} Model ${i}`, promptPerM: 0.05 + i * 0.11, completionPerM: 0.2 + i * 0.4, contextLength: 8192 * (1 + (i % 16)), isFree: false, supportsJson: i % 4 === 0 ? true : i % 4 === 1 ? false : undefined });
+  return ms;
+}
+async function stubModels(page, { fail = false } = {}) {
+  await page.route('**/api/models?*', (r) => json(r, {}, 500)); // never matches plain /api/models
+  await page.route(/\/api\/models$/, (r) => (fail ? json(r, { error: 'model catalog unavailable: OpenRouter models HTTP 403', code: 'catalog_unavailable' }, 502) : json(r, { models: mkModels(), count: 62, total: 62, fetchedAt: new Date().toISOString(), stale: true, error: 'HTTP 503', selected: { scanner: 'openai/gpt-4o-mini', trader: LONG_MODEL, news: 'openai/gpt-4o-mini' }, notes: ['Free (":free") models are heavily rate limited and often answer HTTP 429; a run may fail with code rate_limited and can simply be retried later.', 'Free-model providers may log your prompts and use them for training. Fine for paper trading.'] })));
+  await page.route('**/api/models/estimate?*', (r) => {
+    const u = new URL(r.request().url());
+    const free = /:free/.test(u.searchParams.get('model') || '');
+    return json(r, { bot: u.searchParams.get('bot'), model: u.searchParams.get('model'), basis: 'default', tokens: { prompt: 13000, completion: 1300, samples: 0 }, priceKnown: true, promptPerM: free ? 0 : 0.15, completionPerM: free ? 0 : 0.6, isFree: free, estCostPerRunUsd: free ? 0 : 0.0027, estRunsPerMonthAtBudget: free ? null : 7407, estRunsWithinRemaining: free ? null : 6100, capUsd: 20, remainingUsd: 16.5, notes: [] });
+  });
+  await page.route('**/api/account/models', (r) => (r.request().method() === 'PUT' ? json(r, { email: 'audit@example.com', models: { scanner: 'openai/gpt-4o-mini', trader: LONG_MODEL, news: 'openai/gpt-4o-mini', defaults: { scanner: 'openai/gpt-4o-mini', trader: LONG_MODEL, news: 'openai/gpt-4o-mini' } }, warnings: ['This model is not in the loaded catalog, so its price is unknown. The budget governor will assume a conservative price.'], notes: [] }) : r.continue()));
+}
+const PERF_NEW = { equityCurve: [{ t: new Date(Date.now() - 864e5).toISOString(), equity: 100000 }, { t: new Date().toISOString(), equity: 100210 }], winRate: 0.55, closed: 24, wins: 13, avgR: 0.31, maxDrawdownPct: 1.2, maxDrawdownUsd: 1200, realizedPnl: 210, calibration: [{ bucket: '60-70%', hitRate: 0.5, n: 9 }], pickAccuracy: { hits: 8, total: 14 }, byBot: { ai: { closed: 20, winRate: 0.55, pnl: 300 }, demo: { closed: 4, winRate: 0.25, pnl: -90 } }, proposals: { total: 40, pending: 2, approved: 24, rejected: 9, expired: 4, superseded: 1 }, approval: { approvedNet: 210, rejectedNet: -340.5, approvedCount: 24, rejectedCount: 9, passedOnNet: 55.25, passedOnCount: 5 }, avoidedLoss: 410.75, missedGain: 125.5, baselines: { window: { from: new Date(Date.now() - 7 * 864e5).toISOString(), to: new Date().toISOString() }, ai: { pnl: 210, pct: 0.42, n: 24 }, spyHold: { pnl: 90, pct: 0.18, n: 24 }, randomPicks: { pnl: -40, pct: -0.08, n: 3, seeded: true }, beats: { spyHold: true, randomPicks: null } }, netEdge: -225.3, netEdgeParts: { realizedPnl: 210, maxDrawdownUsd: 1200, avoidedLoss: 410.75, weights: { drawdown: 0.5, avoided: 1 }, formula: 'x' } };
+const RUN_BASE = { running: false, runId: 'r', startedAt: new Date(Date.now() - 42e3).toISOString(), finishedAt: new Date().toISOString(), picks: 0, proposals: 0, autoApproved: 0, opened: 0, demo: false };
+const BLOCKED = {
+  no_api_key: { stage: 'blocked', code: 'no_api_key', error: 'No OpenRouter API key is configured for this account.' },
+  budget_exhausted: { stage: 'blocked', code: 'budget_exhausted', error: 'Monthly AI budget of $20.00 is used up ($20.03 spent). It resets on Oct 1.' },
+  rate_limited: { stage: 'error', code: 'rate_limited', error: 'OpenRouter rate limit (429) for ' + LONG_MODEL + ': ' + 'slow down '.repeat(12) },
+  invalid_output: { stage: 'error', code: 'invalid_output', error: 'The trader returned text that was not valid JSON.' },
+};
 
 /* ---------------- flows ---------------- */
 async function waitLoaded(page) {
@@ -621,6 +709,7 @@ async function main() {
     console.log(`\n== ${vp.name} (${vp.note}, dpr ${vp.dpr}) ==`);
     const ctx = await newContext(browser, vp, { storageState: storage });
     await ensurePositions(ctx);
+    await stubModels(ctx); // the sandbox cannot reach the OpenRouter catalog
     const page = await newPage(ctx, vp);
     await applySafeArea(ctx, page, vp);
     const land = isLandscape(vp);
@@ -710,6 +799,204 @@ async function main() {
       await waitLoaded(p2);
       await p2.waitForSelector('.stepper', { timeout: 8000 });
       await check(p2, vp, 'run-stepper-error');
+      await p2.close();
+    });
+
+
+    /* ---- proposals (stubbed: several cards incl. extremes) ---- */
+    await step(vp, 'proposals', async () => {
+      const p2 = await newPage(ctx, vp, { expectErrors: true });
+      await applySafeArea(ctx, p2, vp);
+      await stubProposals(p2);
+      await p2.route(/\/api\/proposals\/[^/]+\/approve$/, (r) => json(r, { error: 'price moved', code: 'price_moved', details: { proposalEntry: 123456789.12, freshPrice: 125000000.5, driftPct: 1.25, thresholdPct: 1 } }, 409));
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await p2.waitForSelector('.pcard', { timeout: 8000 });
+      await scrollToEl(p2, '#sec-proposals');
+      await check(p2, vp, 'proposals-pending', {
+        extra: async (pg) => {
+          const r = await pg.evaluate(() => {
+            const out = [];
+            document.querySelectorAll('.pcard').forEach((c) => {
+              const a = c.querySelector('[data-act=approve]').getBoundingClientRect();
+              const b = c.querySelector('[data-act=reject]').getBoundingClientRect();
+              if (a.height < 44 || b.height < 44) out.push('approve/reject shorter than 44px');
+              const gap = a.left - b.right;
+              if (gap < 8 && Math.abs(a.top - b.top) < 5) out.push(`approve/reject only ${Math.round(gap)}px apart`);
+            });
+            const cards = document.querySelectorAll('.pcard').length;
+            if (cards !== 3) out.push(`expected 3 cards, got ${cards}`);
+            if (!document.querySelector('.badge-demo')) out.push('no DEMO DATA badge on the demo proposal');
+            if (!/\(3\)/.test(document.title)) out.push(`document.title lacks pending count: ${document.title}`);
+            return out;
+          });
+          return r;
+        },
+      });
+      await scrollToEl(p2, '.pcard:nth-child(2)');
+      await check(p2, vp, 'proposal-short-risk-fail');
+      // expand the clamped reason
+      const why = p2.locator('.pcard .clamp.clamped').first();
+      if (await why.count()) { await why.tap(); await p2.waitForTimeout(150); await check(p2, vp, 'proposal-reason-expanded'); }
+      // approve -> 409 price_moved explained inline
+      await p2.locator('.pcard [data-act=approve]').first().tap();
+      await p2.waitForSelector('.pc-msg', { timeout: 6000 });
+      await check(p2, vp, 'proposal-409-price-moved', { extra: async (pg) => ((await pg.textContent('.pc-msg')).includes('Re-run') ? [] : ['price_moved message lacks the re-run suggestion']) });
+      // reject sheet with optional reason
+      await p2.locator('.pcard [data-act=reject]').first().tap();
+      await p2.waitForSelector('.modal textarea');
+      await check(p2, vp, 'sheet-reject', { modalOpen: true });
+      await p2.keyboard.press('Escape');
+      await p2.waitForTimeout(250);
+      // approve-all confirm sheet
+      await scrollToEl(p2, '#sec-proposals');
+      await p2.locator('#btn-approve-all').tap();
+      await p2.waitForSelector('.modal');
+      await check(p2, vp, 'sheet-approve-all', { modalOpen: true });
+      await p2.keyboard.press('Escape');
+      await p2.waitForTimeout(250);
+      // history tab
+      await p2.locator('#ptab-history').tap();
+      await p2.waitForSelector('.hcard', { timeout: 6000 });
+      await p2.waitForTimeout(300);
+      await scrollToEl(p2, '#sec-proposals');
+      await check(p2, vp, 'proposals-history');
+      await scrollToEl(p2, '.hcard:nth-child(2)');
+      await check(p2, vp, 'proposals-history-whatif');
+      await p2.close();
+    });
+
+    await step(vp, 'proposals-empty-and-real', async () => {
+      const p2 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p2, vp);
+      await p2.goto('/#dashboard');
+      await waitLoaded(p2);
+      await scrollToEl(p2, '#sec-proposals');
+      await check(p2, vp, 'proposals-real-server');
+      const p3 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p3, vp);
+      await stubProposals(p3, [], []);
+      await p3.goto('/#dashboard');
+      await waitLoaded(p3);
+      await scrollToEl(p3, '#sec-proposals');
+      await check(p3, vp, 'proposals-empty-flow');
+      await p2.close();
+      await p3.close();
+    });
+
+    /* ---- run blocked / error states + RUN gate ---- */
+    await step(vp, 'run-blocked', async () => {
+      for (const [code, body] of Object.entries(BLOCKED)) {
+        const p2 = await newPage(ctx, vp);
+        await applySafeArea(ctx, p2, vp);
+        await p2.route('**/api/run/status', (r) => json(r, { ...RUN_BASE, ...body }));
+        await patchStatus(p2, (b) => { b.run = { ...RUN_BASE, ...body }; });
+        await p2.goto('/#dashboard');
+        await waitLoaded(p2);
+        await p2.waitForSelector('.run-problem', { timeout: 8000 });
+        await check(p2, vp, `run-${code}`, {
+          extra: async (pg) => {
+            const acts = await pg.evaluate(() => [...document.querySelectorAll('.run-problem .rp-btn')].map((b) => b.textContent.trim()));
+            const want = { no_api_key: /OpenRouter key/, budget_exhausted: /Raise the cap/, rate_limited: /another model/, invalid_output: /Retry/ }[code];
+            return acts.some((a) => want.test(a)) ? [] : [`${code}: expected action ${want}, got ${acts.join('|')}`];
+          },
+        });
+        await p2.close();
+      }
+      const p3 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p3, vp);
+      await patchStatus(p3, (b) => {
+        b.ai = { required: true, ready: false, blockedReason: 'no_api_key', demo: false };
+      });
+      await p3.goto('/#dashboard');
+      await waitLoaded(p3);
+      await check(p3, vp, 'run-gate-no-key', { extra: async (pg) => ((await pg.evaluate(() => document.getElementById('btn-scan').disabled)) ? [] : ['RUN is not disabled when ai.ready is false']) });
+      await p3.close();
+    });
+
+    /* ---- budget meter levels ---- */
+    await step(vp, 'budget', async () => {
+      for (const lvl of ['ok', 'warn', 'blocked']) {
+        const p2 = await newPage(ctx, vp);
+        await applySafeArea(ctx, p2, vp);
+        await stubBudget(p2, lvl);
+        await p2.goto('/#dashboard');
+        await waitLoaded(p2);
+        await scrollToEl(p2, '#sec-budget-w');
+        await check(p2, vp, `budget-widget-${lvl}`, {
+          extra: async (pg) => {
+            const r = await pg.evaluate(() => { const m = document.querySelector('#w-budget [role=meter]'); return m ? [m.getAttribute('aria-valuenow'), m.getAttribute('aria-valuetext')] : null; });
+            return r && r[0] && r[1] ? [] : ['budget meter lacks aria-valuenow/valuetext'];
+          },
+        });
+        await p2.close();
+      }
+    });
+
+    /* ---- settings: budget, auto-approve, model finder, net edge ---- */
+    await step(vp, 'settings-new', async () => {
+      const p2 = await newPage(ctx, vp, { expectErrors: true });
+      await applySafeArea(ctx, p2, vp);
+      await stubBudget(p2, 'warn');
+      await stubModels(p2);
+      await p2.goto('/#settings');
+      await p2.waitForSelector('#sec-budget', { timeout: 8000 });
+      await p2.waitForSelector('.mf-row', { timeout: 8000 });
+      await p2.waitForTimeout(400);
+      await scrollToEl(p2, '#sec-budget');
+      await check(p2, vp, 'settings-budget-card');
+      await scrollToEl(p2, '#sec-auto');
+      await check(p2, vp, 'settings-auto-approve');
+      await p2.locator('#sw-auto').tap();
+      await p2.waitForSelector('.modal');
+      await check(p2, vp, 'sheet-auto-approve-confirm', { modalOpen: true });
+      await p2.keyboard.press('Escape');
+      await p2.waitForTimeout(250);
+      await scrollToEl(p2, '#sec-models');
+      await check(p2, vp, 'model-finder');
+      await p2.locator('.mf-pick').first().tap();
+      await p2.waitForSelector('.mf-detail .mf-use', { timeout: 6000 });
+      await p2.waitForTimeout(400);
+      await check(p2, vp, 'model-finder-row-open');
+      await p2.locator('#mf-free').evaluate((el) => el.click());
+      await p2.fill('#mf-q', 'llama');
+      await p2.waitForTimeout(500);
+      await scrollToEl(p2, '#sec-models');
+      await check(p2, vp, 'model-finder-filtered');
+      await p2.locator('.mf-use').first().tap().catch(() => {});
+      await p2.waitForTimeout(500);
+      await check(p2, vp, 'model-finder-saved-warning');
+      await p2.locator('#mf-free').evaluate((el) => el.click());
+      await p2.fill('#mf-q', '');
+      await p2.locator('[data-page="2"]').first().tap().catch(() => {});
+      await p2.waitForTimeout(300);
+      await scrollToEl(p2, '.mf-pager');
+      await check(p2, vp, 'model-finder-page2');
+      await scrollToEl(p2, '#sec-edge');
+      await check(p2, vp, 'settings-net-edge');
+      await p2.close();
+      const p3 = await newPage(ctx, vp, { expectErrors: true });
+      await applySafeArea(ctx, p3, vp);
+      await stubModels(p3, { fail: true });
+      await p3.goto('/#settings/models');
+      await p3.waitForSelector('#mf-retry', { timeout: 8000 });
+      await p3.waitForTimeout(500);
+      await check(p3, vp, 'model-finder-catalog-unavailable');
+      await p3.close();
+    });
+
+    await step(vp, 'performance-new', async () => {
+      const p2 = await newPage(ctx, vp);
+      await applySafeArea(ctx, p2, vp);
+      await p2.route('**/api/performance', (r) => json(r, PERF_NEW));
+      await p2.goto('/#performance');
+      await waitLoaded(p2);
+      await p2.waitForTimeout(500);
+      await check(p2, vp, 'performance-edge-baselines');
+      await scrollToEl(p2, '#perf-approval');
+      await check(p2, vp, 'performance-approval-baselines');
+      await scrollToEl(p2, '#perf-base');
+      await check(p2, vp, 'performance-baselines');
       await p2.close();
     });
 
