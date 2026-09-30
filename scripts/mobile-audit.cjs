@@ -139,6 +139,12 @@ function pageAudit(opts) {
     const top = document.elementFromPoint(Math.min(vw - 1, Math.max(0, r.left + r.width / 2)), Math.min(vh - 1, Math.max(0, r.top + r.height / 2)));
     return !!top && !(el.contains(top) || top.contains(el));
   };
+  const clippedAway = (el, r) => {
+    const reg = inScrollRegion(el);
+    if (!reg) return false;
+    const rr = reg.getBoundingClientRect();
+    return r.right <= rr.left + 1 || r.left >= rr.right - 1 || r.bottom <= rr.top + 1 || r.top >= rr.bottom - 1;
+  };
   const overlayOn = !!document.querySelector('.modal') || document.documentElement.classList.contains('menu-open');
   const interactive = document.querySelectorAll('a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab], [role=switch], [tabindex]:not([tabindex="-1"]), [onclick]');
   const small = [];
@@ -155,6 +161,7 @@ function pageAudit(opts) {
     const r = target.getBoundingClientRect();
     // inline links inside a sentence are exempt (WCAG 2.5.8 inline exception)
     if (el.tagName === 'A' && cs.display === 'inline') return;
+    if (clippedAway(el, r)) return; // scrolled out of its scroll region (nav pills)
     if (overlayOn && covered(el, target.getBoundingClientRect())) return; // hidden behind a sheet/scrim
     if (el.matches('.scroll-y, [role=log], [role=region], main') ) return; // scroll containers focusable for keyboard scrolling
     // a role=tab with a single-line row etc still needs size
@@ -170,6 +177,7 @@ function pageAudit(opts) {
       const b = rects[j];
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
       const layer = (e) => (e.closest('.topnav, .modal, .toasts, .topnav-right') ? 1 : 0);
+      if (clippedAway(a.el, a.r) || clippedAway(b.el, b.r)) continue;
       if (covered(a.el, a.r) || covered(b.el, b.r)) continue; // one of them is not actually tappable there
       if (layer(a.el) !== layer(b.el)) continue; // fixed chrome floats above scrolling content by design
       if (a.el.tagName === 'CANVAS' || b.el.tagName === 'CANVAS') continue;
@@ -469,6 +477,22 @@ async function scrollToEl(page, selector) {
   await page.waitForTimeout(200);
 }
 
+/** Keep at least a few open positions on the server (closing tests use them up). */
+async function ensurePositions(ctx) {
+  const get = async (p) => (await ctx.request.get(`${BASE}/api/${p}`)).json();
+  try {
+    const pos = await get('positions');
+    if ((pos.open || []).length >= 3) return;
+    await ctx.request.post(`${BASE}/api/run`, { data: {}, headers: { 'content-type': 'application/json' } });
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (!(await get('run/status')).running) break;
+    }
+  } catch {
+    /* best effort */
+  }
+}
+
 /** The create-account screen: shown at boot when the server enforces setup, else opened from the header button. */
 async function openCreate(page) {
   await page.goto('/');
@@ -586,6 +610,7 @@ async function main() {
   for (const vp of VPS) {
     console.log(`\n== ${vp.name} (${vp.note}, dpr ${vp.dpr}) ==`);
     const ctx = await newContext(browser, vp, { storageState: storage });
+    await ensurePositions(ctx);
     const page = await newPage(ctx, vp);
     await applySafeArea(ctx, page, vp);
     const land = isLandscape(vp);

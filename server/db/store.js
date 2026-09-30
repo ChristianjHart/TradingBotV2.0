@@ -42,6 +42,15 @@ const defaults = {
     maxClassPct: config.trading.maxClassPct,
     maxPerGroup: config.trading.maxPerGroup,
     dailyLossHaltPct: config.trading.dailyLossHaltPct,
+    // Trade proposals (the trader bot only PROPOSES; the owner approves).
+    proposalTtlHours: config.ai.proposalTtlHours, // a pending proposal expires after this many hours
+    autoApprove: false, // OFF by default: nothing is ever opened without an explicit approval unless the owner flips this
+    autoApproveMaxAllocPct: 5, // auto-approval only for proposals whose allocation is <= this % of equity
+    // AI spend governor (USD per UTC calendar month, all bots).
+    monthlyAiBudgetUsd: config.ai.monthlyBudgetUsd,
+    // netEdge = realizedPnl - drawdownWeight x maxDrawdownUsd + avoidedWeight x avoidedLoss
+    netEdgeDrawdownWeight: 0.5,
+    netEdgeAvoidedWeight: 1,
   },
   worker: {
     status: 'online',
@@ -65,6 +74,8 @@ const files = {
   pickScores: path.join(config.dataDir, 'pick-scores.json'),
   positionsArchive: path.join(config.dataDir, 'positions-archive.json'),
   dayStart: path.join(config.dataDir, 'day-start.json'),
+  proposals: path.join(config.dataDir, 'proposals.json'),
+  aiSpend: path.join(config.dataDir, 'ai-spend.json'),
 };
 
 export const MAX_POSITIONS = 1000;
@@ -199,6 +210,29 @@ export const store = {
   },
   getPositionsArchive() {
     return readJson(files.positionsArchive, []);
+  },
+
+  /** Trade proposals (approval queue), newest first. Pending ones are never trimmed away. */
+  getProposals() {
+    return cached('proposals', files.proposals, []);
+  },
+  setProposals(data) {
+    const MAX = 2000;
+    let keep = data;
+    if (data.length > MAX) {
+      const room = Math.max(0, MAX - data.filter((p) => p.status === 'pending').length);
+      let seen = 0;
+      keep = data.filter((p) => p.status === 'pending' || seen++ < room);
+    }
+    put('proposals', files.proposals, keep);
+  },
+
+  /** AI call ledger [{id, ts, bot, model, promptTokens, completionTokens, costUsd, costSource, ok, runId}], ascending by ts. */
+  getSpend() {
+    return cached('aiSpend', files.aiSpend, []);
+  },
+  setSpend(data) {
+    put('aiSpend', files.aiSpend, data.slice(-5000));
   },
 
   /** Start-of-ET-day equity snapshot { day:'YYYY-MM-DD', equity } used for the daily loss halt. */
