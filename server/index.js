@@ -24,6 +24,17 @@ if (!config.appSecret) {
   store.addLog({ level: 'warn', message: msg });
 }
 
+// Which security settings did the server actually find? (names/booleans only — never values)
+{
+  const exact = ['SIGNUP_CODE', 'ADMIN_TOKEN', 'APP_SECRET', 'TRUST_PROXY'];
+  const flag = (v) => (v ? 'set' : 'MISSING');
+  const near = Object.keys(process.env).filter((k) => /sign.?up|admin.?token|app.?secret|trust.?proxy/i.test(k) && !exact.includes(k.toUpperCase().replace(/[^A-Z_]/g, '')));
+  console.log(
+    `[security] detected: SIGNUP_CODE=${flag(config.signupCode)} ADMIN_TOKEN=${flag(config.adminToken)} APP_SECRET=${flag(config.appSecret)} TRUST_PROXY=${config.trustProxy ? 'true' : 'MISSING'} production=${config.isProduction}`,
+  );
+  if (near.length) console.warn(`[security] variables with similar but unrecognised names (ignored): ${near.join(', ')} — expected exactly ${exact.join(', ')}`);
+}
+
 const app = createApp();
 
 function workerAlive() {
