@@ -41,7 +41,7 @@ export function validateSignup({ email, password, confirm, code }, { needsCode =
   const pe = validatePassword(password, email);
   if (pe) errs.password = pe;
   else if (password !== confirm) errs.confirm = 'Passwords do not match.';
-  if (needsCode && !String(code ?? '').trim()) errs.code = 'Enter the setup code (SIGNUP_CODE) configured on the server.';
+  if (needsCode && !String(code ?? '').trim()) errs.code = 'Enter the setup code: your SIGNUP_CODE, or the one-time code from the server log.';
   return errs;
 }
 

@@ -14,7 +14,7 @@ const { applyOwnerCredentials } = await import('../server/auth/accounts.js');
 const AR = await import('../server/routes/auth.js');
 const { loginByIp, loginByPair, loginEmailDelay, signupByIp, signupGlobal, passwordBySession, resetAuthLimiters } = AR;
 const C = await import('../server/auth/crypto.js');
-const { isLoopback, signupState } = await import('../server/auth/policy.js');
+const { isLoopback, signupState, signupCode } = await import('../server/auth/policy.js');
 const { AttemptLimiter } = await import('../server/auth/index.js');
 
 const realFetch = globalThis.fetch;
@@ -79,14 +79,26 @@ test('no account and no ADMIN_TOKEN: app is open and reports setupRequired', asy
 });
 
 // ---------------------------------------------------------------- signup rules
-test('first-run signup without a code: loopback only; proxied/remote clients get 403 signup_disabled', async () => {
-  const viaProxy = await call('POST', '/auth/signup', { body: { email: 'a@b.co', password: PW }, headers: { 'x-forwarded-for': '203.0.113.9' } });
-  assert.equal(viaProxy.status, 403);
-  assert.equal(viaProxy.body.code, 'signup_disabled');
-  assert.match(viaProxy.body.error, /SIGNUP_CODE/);
+test('first-run signup with no SIGNUP_CODE: remote clients need the one-time boot code; loopback needs nothing', async () => {
+  const viaProxy = { 'x-forwarded-for': '203.0.113.9' };
+  // remote, no code -> refused, but as a code problem (there IS a one-time code), not "signup disabled"
+  const noCode = await call('POST', '/auth/signup', { body: { email: 'a@b.co', password: PW }, headers: viaProxy });
+  assert.equal(noCode.status, 403);
+  assert.equal(noCode.body.code, 'invalid_signup_code');
+  const wrong = await call('POST', '/auth/signup', { body: { email: 'a@b.co', password: PW, code: 'guess' }, headers: viaProxy });
+  assert.equal(wrong.body.code, 'invalid_signup_code');
   assert.equal(usersRepo.count(), 0);
-  const status = await call('GET', '/auth/status', { headers: { 'x-forwarded-for': '203.0.113.9' } });
-  assert.equal(status.body.signupOpen, false);
+  const status = await call('GET', '/auth/status', { headers: viaProxy });
+  assert.equal(status.body.signupOpen, true);
+  assert.equal(status.body.signupNeedsCode, true);
+  // the one-time code (what the server prints at startup) lets a remote client create the owner...
+  const bootCode = signupCode();
+  assert.ok(bootCode && bootCode.length >= 12);
+  const remoteOk = await call('POST', '/auth/signup', { body: { email: 'remote@example.com', password: PW, code: bootCode }, headers: viaProxy });
+  assert.equal(remoteOk.status, 200);
+  // ...and it stops working the moment an account exists
+  assert.equal(signupCode(), '');
+  usersRepo._reset();
   const ok = await signup();
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.body, { ok: true, user: { email: 'owner@example.com' } });
@@ -524,8 +536,11 @@ test('scheduled runs skip with a logged reason when no credentials exist', () =>
 
 test('signupState policy helper', () => {
   const req = (addr) => ({ socket: { remoteAddress: addr }, get: (h) => (h === 'host' ? 'localhost:3000' : undefined) });
-  assert.equal(signupState(req('8.8.8.8')).open, false);
+  // nothing configured: remote clients must present the one-time boot code, loopback needs none
+  assert.equal(signupState(req('8.8.8.8')).open, true);
+  assert.equal(signupState(req('8.8.8.8')).needsCode, true);
   assert.equal(signupState(req('127.0.0.1')).open, true);
+  assert.equal(signupState(req('127.0.0.1')).needsCode, false);
   process.env.SIGNUP_CODE = 'abc';
   assert.equal(signupState(req('8.8.8.8')).open, true);
   assert.equal(signupState(req('8.8.8.8')).needsCode, true);
