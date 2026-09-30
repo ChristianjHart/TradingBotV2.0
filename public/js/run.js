@@ -47,12 +47,13 @@ export function runBarHtml() {
       <span class="step-txt"><strong>${s.label}</strong><small>${st === 'active' ? esc(s.hint) : ''}<span class="sr-only"> ${sr}</span></small></span></li>`;
   }).join('');
   if (v.kind === 'blocked' || (!v.visible && pr)) return pr ? problemHtml(pr) : '';
-  const n = Number(r.proposals) || 0;
+  const pend = state.status?.proposalsPending ?? null;
+  const n = pend === 0 ? 0 : Number(r.proposals) || 0;
   const tail =
     v.kind === 'error'
       ? '<span class="neg">Run failed. Nothing was proposed.</span>'
       : v.kind === 'done'
-        ? `<span class="pos">${esc(runDoneText(r))}</span>${n ? ` <a class="linklike" href="#dashboard" data-jump="sec-proposals">Review ${n === 1 ? 'it' : 'them'}</a>` : ''}`
+        ? `<span class="pos">${esc(runDoneText(r, pend))}</span>${n ? ` <a class="linklike" href="#dashboard" data-jump="sec-proposals">Review ${n === 1 ? 'it' : 'them'}</a>` : ''}`
         : state.runLocal === false
           ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded). RUN is disabled until it finishes.</span>'
           : '<span class="dim">Running…</span>';

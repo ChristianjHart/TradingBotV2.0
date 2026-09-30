@@ -1649,7 +1649,7 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
 .pc-msg p { color: var(--text); }
 .pc-msg-x { width: 44px; height: 44px; margin: -10px -12px -10px 0; font-size: 22px; line-height: 1; color: var(--text-muted); display: grid; place-items: center; flex: none; }
 .pc-msg-a { display: flex; gap: 10px; flex-wrap: wrap; }
-.pc-msg-btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
+.pc-msg-btn { color: var(--text); min-height: 44px; padding: 0 14px; font-size: 14px; }
 .pc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 2px; }
 .btn-approve, .btn-reject { min-height: 52px; border-radius: 10px; font-size: 16px; font-weight: 700; letter-spacing: 0.02em; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; }
 .btn-approve { background: var(--approve); color: #fff; border: 1px solid var(--approve-line); }
@@ -1902,3 +1902,15 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
 @media (max-width: 480px) {
   .bm-stats { grid-template-columns: 1fr 1fr; }
 }
+
+/* desktop header: keep one line now that the budget chip lives there */
+@media (min-width: 1101px) {
+  .topnav { gap: 10px; }
+  .topnav-right { gap: 8px; flex-shrink: 0; }
+  .topnav-right .badge, .topnav-right .worker-status, .topnav-right .signout { white-space: nowrap; }
+  .acct-email { max-width: 110px; }
+  .topnav-left { flex: 1 1 auto; min-width: 0; }
+  .nav-links { flex-wrap: nowrap; }
+  .prop-empty { max-width: 720px; }
+}
+@media (min-width: 1101px) and (max-width: 1400px) { .acct-email { display: none; } }

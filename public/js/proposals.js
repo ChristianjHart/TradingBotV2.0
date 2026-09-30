@@ -241,7 +241,7 @@ function setMsg(id, msg) {
 
 function showProblem(id, p) {
   setMsg(id, { tone: p.tone, title: p.title, message: p.message, actions: p.actions });
-  toast(`${p.title}: ${p.message}`, p.tone === 'error' ? 'error' : 'warn', 9000);
+  toast(p.refresh ? `${p.title}: ${p.message}` : `${p.title}. Details are on the card.`, p.tone === 'error' ? 'error' : 'warn', p.refresh ? 9000 : 5000);
 }
 
 async function approveOne(id) {

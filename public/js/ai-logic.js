@@ -63,10 +63,11 @@ export function aiBlocked(ai) {
 }
 
 /** Text for the post-run line: never implies anything opened by itself. */
-export function runDoneText(run) {
+export function runDoneText(run, pending = null) {
   const n = Number(run?.proposals) || 0;
   const auto = Number(run?.autoApproved) || 0;
   const picks = Number(run?.picks) || 0;
+  if (n > 0 && pending === 0) return `Done: ${picks} picks scanned, ${n} ${n === 1 ? 'proposal was' : 'proposals were'} made; none are waiting now (all decided)`;
   let s = n === 0 ? `Done: ${picks} picks scanned, the AI proposed no trades` : `Done: ${picks} picks scanned, ${n} ${n === 1 ? 'proposal is' : 'proposals are'} waiting for your approval`;
   if (auto > 0) s += ` (${auto} more auto-approved within your caps)`;
   return s;
@@ -360,12 +361,13 @@ export function baselineVerdicts(base) {
   if (!base) return [];
   const aiN = Number(base.ai?.n) || 0;
   const one = (id, label, b) => {
+    const nice = id === 'spyHold' ? label : label.toLowerCase();
     const n = Number(b?.n) || 0;
     const beats = base.beats?.[id];
     if (beats == null || aiN < MIN_BASELINE_N || n < MIN_BASELINE_N) {
-      return { id, label, tone: 'neutral', text: `Not enough data yet (AI ${aiN}, ${label.toLowerCase()} ${n}; need ${MIN_BASELINE_N}+ each)` };
+      return { id, label, tone: 'neutral', text: `Not enough data yet (AI ${aiN}, ${nice} ${n}; need ${MIN_BASELINE_N}+ each)` };
     }
-    return beats ? { id, label, tone: 'good', text: `AI is ahead of ${label.toLowerCase()}` } : { id, label, tone: 'bad', text: `AI is behind ${label.toLowerCase()}` };
+    return beats ? { id, label, tone: 'good', text: `AI is ahead of ${nice}` } : { id, label, tone: 'bad', text: `AI is behind ${nice}` };
   };
   return [one('spyHold', 'SPY hold', base.spyHold), one('randomPicks', 'Random picks', base.randomPicks)];
 }
