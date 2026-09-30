@@ -135,6 +135,11 @@ function pageAudit(opts) {
   if (offenders.length) problems.push(`overflow: ${offenders.length} element(s) outside viewport, e.g. ${offenders.slice(0, 4).join('; ')}`);
 
   /* 2. touch targets */
+  const covered = (el, r) => {
+    const top = document.elementFromPoint(Math.min(vw - 1, Math.max(0, r.left + r.width / 2)), Math.min(vh - 1, Math.max(0, r.top + r.height / 2)));
+    return !!top && !(el.contains(top) || top.contains(el));
+  };
+  const overlayOn = !!document.querySelector('.modal') || document.documentElement.classList.contains('menu-open');
   const interactive = document.querySelectorAll('a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab], [role=switch], [tabindex]:not([tabindex="-1"]), [onclick]');
   const small = [];
   const rects = [];
@@ -150,6 +155,7 @@ function pageAudit(opts) {
     const r = target.getBoundingClientRect();
     // inline links inside a sentence are exempt (WCAG 2.5.8 inline exception)
     if (el.tagName === 'A' && cs.display === 'inline') return;
+    if (overlayOn && covered(el, target.getBoundingClientRect())) return; // hidden behind a sheet/scrim
     if (el.matches('.scroll-y, [role=log], [role=region], main') ) return; // scroll containers focusable for keyboard scrolling
     // a role=tab with a single-line row etc still needs size
     if (r.width < 43.5 || r.height < 43.5) small.push(`${sel(el)} ${Math.round(r.width)}x${Math.round(r.height)}`);
@@ -164,6 +170,7 @@ function pageAudit(opts) {
       const b = rects[j];
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
       const layer = (e) => (e.closest('.topnav, .modal, .toasts, .topnav-right') ? 1 : 0);
+      if (covered(a.el, a.r) || covered(b.el, b.r)) continue; // one of them is not actually tappable there
       if (layer(a.el) !== layer(b.el)) continue; // fixed chrome floats above scrolling content by design
       if (a.el.tagName === 'CANVAS' || b.el.tagName === 'CANVAS') continue;
       if (a.el.closest('.af-wrap') && a.el.closest('.af-wrap') === b.el.closest('.af-wrap')) continue; // show/hide button lives inside its field
@@ -247,7 +254,9 @@ function pageAudit(opts) {
   document.querySelectorAll('canvas, img, svg, iframe, video').forEach((el) => {
     if (!visible(el)) return;
     const r = el.getBoundingClientRect();
-    if (r.right > vw + 1 || r.left < -1) media.push(`${sel(el)} [${Math.round(r.left)}..${Math.round(r.right)}]`);
+    const reg = inScrollRegion(el);
+    const regOk = reg && reg.getBoundingClientRect().right <= vw + 1 && reg.getBoundingClientRect().left >= -1;
+    if ((r.right > vw + 1 || r.left < -1) && !regOk) media.push(`${sel(el)} [${Math.round(r.left)}..${Math.round(r.right)}]`);
     if (el.tagName === 'CANVAS') {
       if (r.height > vh * 0.9 && vw > vh) media.push(`${sel(el)} taller (${Math.round(r.height)}) than 90% of the landscape viewport`);
       if (el.width === 300 && el.height === 150) return; // never drawn (no data in this state)
