@@ -89,6 +89,9 @@ function pageAudit(opts) {
     if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
+    // content of a closed <details> (other than its <summary>) is not rendered, so it cannot be tapped or overlap anything
+    const closed = el.closest('details:not([open])');
+    if (closed && !el.closest('summary')) return false;
     for (let p = el.parentElement; p; p = p.parentElement) {
       const ps = style(p);
       if (ps.display === 'none' || ps.visibility === 'hidden') return false;
