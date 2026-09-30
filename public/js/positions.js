@@ -20,6 +20,8 @@ export const COLS = [
   { key: 'left', label: 'TIME LEFT', get: (p) => (p.expiresAt ? new Date(p.expiresAt).getTime() : Infinity) },
 ];
 
+const SORT_LABEL = { symbol: 'Symbol', side: 'Side', allocation: 'Allocation', entry: 'Entry price', stopLoss: 'Stop price', takeProfit: 'Target price', progress: 'Progress to target', pnl: 'P&amp;L', left: 'Time left' };
+
 export { progressOf, riskOf };
 export function findPos(id) {
   const o = state.positions?.open?.find((p) => p.id === id);
@@ -53,7 +55,8 @@ export function newOpenRow() {
     <td data-f="progress" data-label="Stop ⟷ Target"><div class="rbar"><span class="rentry"></span><span class="rmark"></span></div><div class="rtxt mono dim"></div></td>
     <td class="mono" data-f="pnl" data-label="P&amp;L"><span class="v"></span> <span class="dim pc"></span></td>
     <td class="mono" data-f="left" data-label="Time left"></td>
-    <td data-label=""><button class="btn-close" type="button">Close</button></td>`;
+    <td class="td-reason" data-f="reason" data-label="Why"><div class="clamp"></div></td>
+    <td data-f="act" data-label=""><button class="btn-close" type="button">Close</button></td>`;
   return tr;
 }
 
@@ -66,6 +69,8 @@ export function patchOpenRow(tr, p, selected) {
   else tr.removeAttribute('aria-current');
   tr.classList.toggle('sel', selected);
   setText(f('symbol'), p.symbol);
+  setText(f('reason').firstChild, p.reason || '');
+  f('reason').hidden = !p.reason;
   const pill = f('side').firstChild;
   setCls(pill, `pill pill-${p.side === 'short' ? 'short' : 'long'}`);
   setText(pill, p.side);
@@ -118,10 +123,18 @@ export function patchOpenTable() {
   }
   if (!wrap.__table || !wrap.contains(wrap.__table)) {
     wrap.__h = null;
-    wrap.innerHTML = `<div class="scroll-y short" tabindex="0" role="region" aria-label="Open positions table"><table class="table cards" id="open-table"><tbody></tbody></table></div>`;
+    wrap.innerHTML = `<div class="sortbar"><label for="pos-sort">Sort by</label><select id="pos-sort">${COLS.map((c) => `<option value="${c.key}">${SORT_LABEL[c.key]}</option>`).join('')}</select><button type="button" id="pos-sort-dir" class="sort-dir"></button></div><div class="scroll-y short" tabindex="0" role="region" aria-label="Open positions table"><table class="table cards t-open" id="open-table"><tbody></tbody></table></div>`;
     wrap.__table = wrap.querySelector('table');
   }
   const table = wrap.__table;
+  const sel = wrap.querySelector('#pos-sort');
+  if (sel && sel.value !== state.sort.key) sel.value = state.sort.key;
+  const sd = wrap.querySelector('#pos-sort-dir');
+  if (sd) {
+    const desc = state.sort.dir === 'desc';
+    setText(sd, desc ? '↓ High → low' : '↑ Low → high');
+    sd.setAttribute('aria-label', `Sort direction: ${desc ? 'descending' : 'ascending'}. Activate to reverse.`);
+  }
   const headHtml = openHeadHtml();
   if (table.__head !== headHtml) {
     table.querySelector('thead')?.remove();
@@ -150,7 +163,7 @@ export function closedHtml() {
   const closed = state.positions?.closed || [];
   if (!state.loaded) return skeleton(4);
   if (!closed.length) return empty('No closed positions yet');
-  return `<div class="scroll-y short" tabindex="0" role="region" aria-label="Closed positions table"><table class="table cards">
+  return `<div class="scroll-y short" tabindex="0" role="region" aria-label="Closed positions table"><table class="table cards t-closed">
     <thead><tr><th scope="col">SYMBOL</th><th scope="col">SIDE</th><th scope="col">ENTRY</th><th scope="col">EXIT</th><th scope="col">P&amp;L</th><th scope="col">REASON</th><th scope="col">CLOSED</th></tr></thead>
     <tbody>${closed.map((p) => `<tr class="pos-row ${p.id === state.selectedPos ? 'sel' : ''}" tabindex="0" data-pos="${esc(p.id)}" ${p.id === state.selectedPos ? 'aria-current="true"' : ''} aria-label="${esc(p.symbol)} closed ${esc(p.side)} position, P&L ${esc(fmtMoney(p.pnl))}. Press Enter to show chart.">
       <td class="sym" data-label="Symbol">${esc(p.symbol)}</td>
@@ -241,7 +254,7 @@ export async function patchPosChart() {
   if (box) box.hidden = !found;
   if (!found) return setHtml(head, '');
   const p = found.p;
-  setHtml(head, `<strong>${esc(p.symbol)}</strong> · ${esc(p.side.toUpperCase())}${found.open ? '' : ' · closed'} — <span class="dim">${esc(p.reason || '')}</span>`);
+  setHtml(head, `<strong>${esc(p.symbol)}</strong> · ${esc(p.side.toUpperCase())}${found.open ? '' : ' · closed'} — <span class="dim clamp pos-why">${esc(p.reason || '')}</span>`);
   if (!charts.pos) charts.pos = new CandleChart(canvas, { summaryEl: $('pos-chart-sum'), tableEl: $('pos-chart-table'), tableBars: 20 });
   const key = `${p.id}|${state.tf}`;
   const opts = posChartOpts(found);
@@ -378,7 +391,22 @@ export async function closeAll() {
   }
 }
 
+export function posChange(e) {
+  const sel = e.target.closest?.('#pos-sort');
+  if (!sel) return;
+  const key = sel.value;
+  state.sort = { key, dir: key === 'symbol' || key === 'side' ? 'asc' : 'desc' };
+  savePrefs();
+  patchOpenTable();
+}
+
 export function posClick(e) {
+  if (e.target.closest('#pos-sort-dir')) {
+    state.sort = { key: state.sort.key, dir: state.sort.dir === 'asc' ? 'desc' : 'asc' };
+    savePrefs();
+    patchOpenTable();
+    return;
+  }
   const sortBtn = e.target.closest('[data-sort]');
   if (sortBtn) {
     const key = sortBtn.dataset.sort;

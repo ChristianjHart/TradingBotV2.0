@@ -17,7 +17,7 @@ export function toast(message, kind = 'info', ms = 5000) {
   const el = document.createElement('div');
   el.className = `toast toast-${kind}`;
   el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
-  el.innerHTML = `<span class="toast-msg">${escapeHtml(message)}</span><button type="button" class="toast-x" aria-label="Dismiss notification">×</button>`;
+  el.innerHTML = `<span class="toast-msg">${escapeHtml(message)}</span><button type="button" class="toast-x" aria-label="Dismiss notification"><span aria-hidden="true">×</span></button>`;
   const close = () => el.remove();
   el.querySelector('.toast-x').addEventListener('click', close);
   host().appendChild(el);
@@ -40,11 +40,15 @@ function modal({ title, bodyHtml, actions, initialFocus }) {
     const dlg = back.querySelector('.modal');
     const app = document.getElementById('app');
     app?.setAttribute('inert', '');
+    document.documentElement.classList.add('modal-open');
     const done = (val) => {
       document.removeEventListener('keydown', onKey, true);
       app?.removeAttribute('inert');
       back.remove();
+      if (!document.querySelector('.modal-backdrop')) document.documentElement.classList.remove('modal-open');
       opener?.focus?.();
+      // the opener may live in a menu sheet that has since closed: fall back to the menu button
+      if (document.activeElement === document.body || document.activeElement === null) document.getElementById('btn-menu')?.focus?.({ preventScroll: true });
       resolve(val);
     };
     const value = () => dlg.querySelector('input')?.value ?? null;
@@ -70,7 +74,7 @@ function modal({ title, bodyHtml, actions, initialFocus }) {
       }
     };
     document.addEventListener('keydown', onKey, true);
-    back.addEventListener('mousedown', (e) => {
+    back.addEventListener('pointerdown', (e) => {
       if (e.target === back) done({ act: 'cancel', value: null });
     });
     dlg.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => done({ act: b.dataset.act, value: value() })));
@@ -95,7 +99,7 @@ export async function tokenDialog(message) {
   const r = await modal({
     title: 'Admin token required',
     bodyHtml: `<p>${escapeHtml(message || 'This action needs the admin token configured on the server (ADMIN_TOKEN).')}</p>
-      <label class="modal-field">Admin token<input type="password" autocomplete="off" spellcheck="false" /></label>`,
+      <label class="modal-field">Admin token<input type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" /></label>`,
     actions: [
       { id: 'cancel', label: 'Cancel', cls: 'btn-ghost' },
       { id: 'ok', label: 'Save & retry', cls: 'btn-accent' },

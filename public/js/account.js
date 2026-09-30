@@ -15,11 +15,11 @@ function chip(tone, label) {
 }
 
 function pwField(id, label, auto) {
-  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="${auto}" spellcheck="false" autocapitalize="none" required aria-describedby="${id}-e" /><span class="fld-err" id="${id}-e"></span></label>`;
+  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="${auto}" spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="${id === 'pw-conf' ? 'go' : 'next'}" required aria-describedby="${id}-e" /><span class="fld-err" id="${id}-e"></span></label>`;
 }
 
 function secretField(id, label, disabled) {
-  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" data-lpignore="true" ${disabled ? 'disabled' : ''} aria-describedby="${id}-e" placeholder="Paste to save or replace" /><span class="fld-err" id="${id}-e"></span></label>`;
+  return `<label for="${id}">${label}<input id="${id}" name="${id}" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="${id === 'k-ak' ? 'next' : 'go'}" data-lpignore="true" ${disabled ? 'disabled' : ''} aria-describedby="${id}-e" placeholder="Paste to save or replace" /><span class="fld-err" id="${id}-e"></span></label>`;
 }
 
 function keyGroup(kind, a) {
@@ -72,8 +72,8 @@ function render() {
   </section>
   <section class="widget models-card" aria-labelledby="h-models"><h2 class="widget-title" id="h-models">MODELS</h2>
     <form class="settings-form" id="f-models" novalidate>
-      <label for="m-scan">Scanner model<input id="m-scan" name="scanner" type="text" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.scanner ?? d.scanner ?? '')}" placeholder="${esc(d.scanner || 'vendor/model')}" aria-describedby="m-scan-h m-scan-e" /><span class="fld-hint" id="m-scan-h">Default: <code>${esc(d.scanner || '—')}</code></span><span class="fld-err" id="m-scan-e"></span></label>
-      <label for="m-trad">Trader model<input id="m-trad" name="trader" type="text" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.trader ?? d.trader ?? '')}" placeholder="${esc(d.trader || 'vendor/model')}" aria-describedby="m-trad-h m-trad-e" /><span class="fld-hint" id="m-trad-h">Default: <code>${esc(d.trader || '—')}</code></span><span class="fld-err" id="m-trad-e"></span></label>
+      <label for="m-scan">Scanner model<input id="m-scan" name="scanner" type="text" inputmode="text" enterkeyhint="next" autocorrect="off" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.scanner ?? d.scanner ?? '')}" placeholder="${esc(d.scanner || 'vendor/model')}" aria-describedby="m-scan-h m-scan-e" /><span class="fld-hint" id="m-scan-h">Default: <code>${esc(d.scanner || '—')}</code></span><span class="fld-err" id="m-scan-e"></span></label>
+      <label for="m-trad">Trader model<input id="m-trad" name="trader" type="text" inputmode="text" enterkeyhint="go" autocorrect="off" spellcheck="false" autocomplete="off" autocapitalize="none" value="${esc(a.models?.trader ?? d.trader ?? '')}" placeholder="${esc(d.trader || 'vendor/model')}" aria-describedby="m-trad-h m-trad-e" /><span class="fld-hint" id="m-trad-h">Default: <code>${esc(d.trader || '—')}</code></span><span class="fld-err" id="m-trad-e"></span></label>
       <div class="form-err" role="alert" data-err></div>
       <div class="row-actions"><button class="btn-accent" type="submit">Save models</button><button class="btn-ghost" type="button" id="btn-models-reset" ${d.scanner || d.trader ? '' : 'disabled'}>Reset to defaults</button></div>
     </form>

@@ -14,8 +14,8 @@ export function mountSettings() {
     <div class="settings-grid">
     <section class="widget" aria-labelledby="h-set"><h2 class="widget-title" id="h-set">SETTINGS</h2>
       <form class="settings-form" id="settings-form">
-        <label for="s-hz">Position / prediction horizon (hours)<input id="s-hz" name="horizonHours" type="number" min="1" max="168" value="${esc(s.horizonHours ?? 24)}" /></label>
-        <label for="s-wl">Watchlist size (legacy scanner)<input id="s-wl" name="watchlistSize" type="number" min="3" max="40" value="${esc(s.watchlistSize ?? 12)}" /></label>
+        <label for="s-hz">Position / prediction horizon (hours)<input id="s-hz" name="horizonHours" type="number" inputmode="numeric" enterkeyhint="next" min="1" max="168" value="${esc(s.horizonHours ?? 24)}" /></label>
+        <label for="s-wl">Watchlist size (legacy scanner)<input id="s-wl" name="watchlistSize" type="number" inputmode="numeric" enterkeyhint="done" min="3" max="40" value="${esc(s.watchlistSize ?? 12)}" /></label>
         <label for="s-as">Auto scan (legacy scanner)<select id="s-as" name="autoScan"><option value="true" ${s.autoScan !== false ? 'selected' : ''}>On</option><option value="false" ${s.autoScan === false ? 'selected' : ''}>Off</option></select></label>
         <button class="btn-accent" type="submit">Save</button>
       </form></section>

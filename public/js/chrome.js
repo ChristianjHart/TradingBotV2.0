@@ -1,5 +1,6 @@
 import { api, getToken, onUnauthorized, setToken } from './api.js';
 import { openSignup, signOut, updateAccountChrome } from './auth.js';
+import { revealActiveNav } from './mobile.js';
 import { refresh } from './data.js';
 import { mountSettings } from './settings.js';
 import { hooks, $, setText, state } from './state.js';
@@ -8,10 +9,15 @@ import { confirmDialog, toast, tokenDialog } from './ui.js';
 export function setWorkerUI(worker) {
   const dot = $('worker-dot');
   if (!worker || !dot) return;
-  dot.classList.remove('offline', 'warn');
-  if (worker.status === 'degraded') dot.classList.add('warn');
-  else if (worker.status !== 'online') dot.classList.add('offline');
-  setText($('worker-label'), `worker ${worker.status || 'unknown'}`);
+  const label = `worker ${worker.status || 'unknown'}`;
+  [['worker-dot', 'worker-label'], ['worker-dot-m', 'worker-label-m']].forEach(([d, l]) => {
+    const el = $(d);
+    if (!el) return;
+    el.classList.remove('offline', 'warn');
+    if (worker.status === 'degraded') el.classList.add('warn');
+    else if (worker.status !== 'online') el.classList.add('offline');
+    setText($(l), label);
+  });
 }
 
 export function updateAuthUI() {
@@ -49,6 +55,7 @@ export function navActive(page) {
     if (on) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+  revealActiveNav();
 }
 
 export async function authClick() {

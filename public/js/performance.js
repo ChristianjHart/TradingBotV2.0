@@ -110,8 +110,8 @@ export function runsPatch() {
   if (!runs.length) return setHtml(el, empty('No runs recorded yet — press RUN on the dashboard.'));
   setHtml(
     el,
-    `<div class="scroll-y" tabindex="0" role="region" aria-label="Run history table"><table class="table cards"><thead><tr><th scope="col">WHEN</th><th scope="col">TRADER</th><th scope="col">PICKS</th><th scope="col">TRADES</th><th scope="col">NOTE</th></tr></thead><tbody>${runs
-      .map((r) => `<tr><td class="mono" data-label="When">${esc(fmtDateTime(r.at))}</td><td data-label="Trader">${esc(r.traderSource === 'ai' ? `AI ${r.traderModel || ''}` : 'Rules')}</td><td class="mono" data-label="Picks">${esc(r.picks ?? '—')}</td><td class="mono" data-label="Trades">${r.trades?.length ?? 0}${(r.trades || []).length ? ` <span class="dim">(${(r.trades || []).slice(0, 4).map((t) => esc(t.symbol)).join(', ')}${r.trades.length > 4 ? '…' : ''})</span>` : ''}</td><td class="reason" data-label="Note">${esc(r.note || '')}</td></tr>`)
+    `<div class="scroll-y" tabindex="0" role="region" aria-label="Run history table"><table class="table cards t-runs"><thead><tr><th scope="col">WHEN</th><th scope="col">TRADER</th><th scope="col">PICKS</th><th scope="col">TRADES</th><th scope="col">NOTE</th></tr></thead><tbody>${runs
+      .map((r) => `<tr><td class="mono" data-label="When">${esc(fmtDateTime(r.at))}</td><td data-label="Trader">${esc(r.traderSource === 'ai' ? `AI ${r.traderModel || ''}` : 'Rules')}</td><td class="mono" data-label="Picks">${esc(r.picks ?? '—')}</td><td class="mono" data-label="Trades">${r.trades?.length ?? 0}${(r.trades || []).length ? ` <span class="dim">(${(r.trades || []).slice(0, 4).map((t) => esc(t.symbol)).join(', ')}${r.trades.length > 4 ? '…' : ''})</span>` : ''}</td><td class="reason" data-label="Note"><div class="clamp">${esc(r.note || '')}</div></td></tr>`)
       .join('')}</tbody></table></div>`,
   );
 }

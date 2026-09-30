@@ -163,10 +163,10 @@ function eyeBtn(target) {
   return `<button type="button" class="pw-toggle" data-toggle="${target}" aria-pressed="false" aria-controls="${target}" aria-label="Show password">Show</button>`;
 }
 
-function field({ id, label, type = 'text', auto, extra = '', hint = '', pw = false, inputmode = '' }) {
+function field({ id, label, type = 'text', auto, extra = '', hint = '', pw = false, inputmode = '', enter = 'next' }) {
   return `<div class="af">
     <label for="${id}">${label}</label>
-    <div class="af-wrap"><input id="${id}" name="${id}" type="${type}" autocomplete="${auto}" ${inputmode ? `inputmode="${inputmode}"` : ''} spellcheck="false" autocapitalize="none" ${extra} aria-describedby="${id}-err${hint ? ` ${id}-hint` : ''}" />${pw ? eyeBtn(id) : ''}</div>
+    <div class="af-wrap"><input id="${id}" name="${id}" type="${type}" autocomplete="${auto}" ${inputmode ? `inputmode="${inputmode}"` : ''} spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="${enter}" ${extra} aria-describedby="${id}-err${hint ? ` ${id}-hint` : ''}" />${pw ? eyeBtn(id) : ''}</div>
     ${hint ? `<div class="af-hint" id="${id}-hint">${hint}</div>` : ''}
     <div class="af-err" id="${id}-err" aria-live="polite"></div></div>`;
 }
@@ -174,7 +174,7 @@ function field({ id, label, type = 'text', auto, extra = '', hint = '', pw = fal
 function signinHtml() {
   return `<form id="f-signin" novalidate aria-labelledby="auth-h">
     ${field({ id: 'si-email', label: 'Email', type: 'email', auto: 'username', extra: 'required', inputmode: 'email' })}
-    ${field({ id: 'si-pw', label: 'Password', type: 'password', auto: 'current-password', extra: 'required', pw: true })}
+    ${field({ id: 'si-pw', label: 'Password', type: 'password', auto: 'current-password', extra: 'required', pw: true, enter: 'go' })}
     <button class="auth-submit" type="submit"><span class="spin" aria-hidden="true" hidden></span><span class="lbl">Sign in</span></button>
   </form>`;
 }
@@ -187,8 +187,8 @@ function signupHtml() {
     ${field({ id: 'su-email', label: 'Email', type: 'email', auto: 'username', extra: 'required', inputmode: 'email' })}
     ${field({ id: 'su-pw', label: 'Password', type: 'password', auto: 'new-password', extra: 'required minlength="10"', pw: true, hint: 'At least 10 characters. A long passphrase is best.' })}
     <div class="strength" id="su-strength" aria-live="polite"><div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div><span id="su-strength-txt">Use at least 10 characters.</span></div>
-    ${field({ id: 'su-pw2', label: 'Confirm password', type: 'password', auto: 'new-password', extra: 'required', pw: true })}
-    ${a.signupNeedsCode ? field({ id: 'su-code', label: 'Setup code', type: 'text', auto: 'off', extra: 'required', hint: 'Your <code>SIGNUP_CODE</code>, or — if you never set one — the one-time code the server prints in its log at startup (Render → Logs, look for <code>[setup] One-time setup code</code>). Case and dashes do not matter.' }) : ''}
+    ${field({ id: 'su-pw2', label: 'Confirm password', type: 'password', auto: 'new-password', extra: 'required', pw: true, enter: a.signupNeedsCode ? 'next' : 'go' })}
+    ${a.signupNeedsCode ? field({ id: 'su-code', label: 'Setup code', type: 'text', auto: 'off', enter: 'go', extra: 'required', hint: 'Your <code>SIGNUP_CODE</code>, or — if you never set one — the one-time code the server prints in its log at startup (Render → Logs, look for <code>[setup] One-time setup code</code>). Case and dashes do not matter.' }) : ''}
     <button class="auth-submit" type="submit"><span class="spin" aria-hidden="true" hidden></span><span class="lbl">Create account</span></button>
   </form>`;
 }

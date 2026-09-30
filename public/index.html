@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0e1014" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="tradingbot" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Dashboard · tradingbot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,16 +28,25 @@
       <div class="topnav-left">
         <a class="brand" href="#dashboard">tradingbot</a>
         <nav class="nav-links" id="main-nav" aria-label="Main">
-          <a href="#dashboard" data-nav="dashboard" class="active" aria-current="page">DASHBOARD</a>
-          <a href="#performance" data-nav="performance">PERFORMANCE</a>
-          <a href="#market" data-nav="market">MARKET</a>
-          <a href="#logs" data-nav="logs">LOGS</a>
-          <a href="#settings" data-nav="settings">SETTINGS</a>
+          <a href="#dashboard" data-nav="dashboard" class="active" aria-current="page" aria-label="Dashboard"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v10H3zM13 3h8v6h-8zM13 11h8v10h-8zM3 15h8v6H3z"/></svg><span class="nav-full">DASHBOARD</span><span class="nav-short" aria-hidden="true">Dash</span></a>
+          <a href="#performance" data-nav="performance" aria-label="Performance"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-9M15 6h6v6"/></svg><span class="nav-full">PERFORMANCE</span><span class="nav-short" aria-hidden="true">Perf</span></a>
+          <a href="#market" data-nav="market" aria-label="Market"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M6 8h0M6 7v9M12 3v18M18 6v13M4 9h4v6H4zM10 6h4v9h-4zM16 9h4v7h-4z"/></svg><span class="nav-full">MARKET</span><span class="nav-short" aria-hidden="true">Market</span></a>
+          <a href="#logs" data-nav="logs" aria-label="Logs"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="nav-full">LOGS</span><span class="nav-short" aria-hidden="true">Logs</span></a>
+          <a href="#settings" data-nav="settings" aria-label="Settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/></svg><span class="nav-full">SETTINGS</span><span class="nav-short" aria-hidden="true">Settings</span></a>
         </nav>
       </div>
-      <div class="topnav-right">
+      <div class="topnav-status">
+        <span class="worker-status" id="worker-status-m" role="status">
+          <span class="dot" id="worker-dot-m" aria-hidden="true"></span>
+          <span id="worker-label-m">worker</span>
+        </span>
+        <button class="menu-btn" id="btn-menu" type="button" aria-expanded="false" aria-controls="topnav-right" aria-label="Menu: worker controls and account"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      </div>
+      <div class="menu-scrim" id="menu-scrim" hidden></div>
+      <div class="topnav-right" id="topnav-right">
+        <div class="sheet-grip" aria-hidden="true"></div>
         <span class="badge badge-paper" id="mode-badge" title="Simulated positions only — no orders are ever sent">PAPER · PREDICT</span>
-        <span class="worker-status" id="worker-status" role="status">
+        <span class="worker-status" id="worker-status">
           <span class="dot" id="worker-dot" aria-hidden="true"></span>
           <span id="worker-label">worker</span>
         </span>

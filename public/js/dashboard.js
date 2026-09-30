@@ -1,7 +1,7 @@
 import { clsPos, escapeHtml as esc, fmtMoney, fmtTime } from './api.js';
 import { donutGradient } from './run-logic.js';
 import { patchPerf, perfShellHtml } from './performance.js';
-import { applyPosTab, patchPositions, posClick, posKey, tfButtonsHtml, tfClick } from './positions.js';
+import { applyPosTab, patchPositions, posChange, posClick, posKey, tfButtonsHtml, tfClick } from './positions.js';
 import { patchRunBar, startRun } from './run.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
@@ -22,7 +22,7 @@ export function summaryHtml() {
     <div class="dim sum-when">${esc(new Date(sm.at).toLocaleString())} · scanner ${esc(sm.scannerModel || sm.scannerSource)} · trader ${esc(sm.traderModel || sm.traderSource)}</div>
     ${sm.note ? `<p class="sum-note">${esc(sm.note)}</p>` : ''}
     ${n ? `<ul class="sum-list">${sm.trades.map((t) => `<li><span class="sym">${esc(t.symbol)}</span> <span class="pill pill-${esc(t.side)}">${esc(t.side)}</span>
-        <span class="mono dim">${fmtMoney(t.allocation, 0)}</span> — ${esc(t.reason)}</li>`).join('')}</ul>` : ''}
+        <span class="mono dim">${fmtMoney(t.allocation, 0)}</span> <span class="sum-r clamp">— ${esc(t.reason)}</span></li>`).join('')}</ul>` : ''}
     ${(sm.rejected || []).length ? `<div class="dim sum-rej">Passed on: ${sm.rejected.map(esc).join(', ')}</div>` : ''}`;
 }
 
@@ -105,14 +105,14 @@ export function picksHtml() {
   if (!state.loaded) return skeleton(5);
   const picks = state.picks?.picks || [];
   if (!picks.length) return empty('Press RUN — the scanner bot will rank the top 100 symbols');
-  return `<div class="scroll-y" tabindex="0" role="region" aria-label="Scanner picks table"><table class="table cards">
+  return `<div class="scroll-y" tabindex="0" role="region" aria-label="Scanner picks table"><table class="table cards t-picks${state.picksAll ? ' show-all' : ''}">
     <thead><tr><th scope="col">#</th><th scope="col">SYMBOL</th><th scope="col">DIR</th><th scope="col">CONF</th><th scope="col">REASON</th></tr></thead>
     <tbody>${picks.map((p, i) => `<tr>
       <td class="dim mono" data-label="Rank">${i + 1}</td>
       <td class="sym" data-label="Symbol">${esc(p.symbol)}</td>
       <td data-label="Direction"><span class="pill pill-${esc(p.direction)}">${esc(p.direction)}</span></td>
       <td class="mono" data-label="Confidence">${(p.confidence * 100).toFixed(0)}%</td>
-      <td class="reason" data-label="Reason">${esc(p.reason)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td class="reason" data-label="Reason"><div class="clamp">${esc(p.reason)}</div></td></tr>`).join('')}</tbody></table></div>${picks.length > 10 ? `<button type="button" class="btn-ghost picks-more" id="picks-more" aria-pressed="${!!state.picksAll}">${state.picksAll ? 'Show top 10 only' : `Show all ${picks.length} picks`}</button>` : ''}`;
 }
 
 export function mountDashboard() {
@@ -159,6 +159,7 @@ export function mountDashboard() {
   $('btn-scan').addEventListener('click', startRun);
   const pw = $('pos-open').parentElement;
   pw.addEventListener('click', posClick);
+  pw.addEventListener('change', posChange);
   pw.addEventListener('keydown', posKey);
   document.querySelector('.tabs[role=tablist]').addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
@@ -169,6 +170,11 @@ export function mountDashboard() {
     $(`tab-${state.posTab}`).focus();
   });
   $('tf-pos').addEventListener('click', tfClick);
+  $('w-picks').addEventListener('click', (e) => {
+    if (!e.target.closest('#picks-more')) return;
+    state.picksAll = !state.picksAll;
+    setHtml($('w-picks'), picksHtml());
+  });
   patchDashboard();
 }
 

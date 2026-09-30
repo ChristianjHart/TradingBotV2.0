@@ -4,6 +4,7 @@ import { bannersHtml, mountDashboard, patchDashboard, patchUpdated } from './das
 import { refresh } from './data.js';
 import { hydrateRun } from './run.js';
 import { loadLogs, mountLogs } from './logs.js';
+import { initMobile } from './mobile.js';
 import { loadQuotes, mountMarket } from './market.js';
 import { loadRuns, mountPerformance, patchPerformancePage } from './performance.js';
 import { leftText, resetChartKey } from './positions.js';
@@ -94,6 +95,7 @@ async function startApp() {
 async function boot() {
   hooks.patchCurrent = patchCurrent;
   bindChrome();
+  initMobile();
   window.addEventListener('hashchange', () => {
     if (state.locked) return; // the route is kept and restored after sign-in
     state.page = routeFromHash();
