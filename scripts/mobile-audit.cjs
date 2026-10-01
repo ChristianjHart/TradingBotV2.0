@@ -819,8 +819,9 @@ async function main() {
         extra: async (pg) => {
           const out = [];
           const h = await pg.evaluate(() => document.documentElement.scrollHeight);
-          // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more
-          if (h > 3600) out.push(`collapsed dashboard is ${h}px tall (budget 3600 with extreme stub content)`);
+          // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more.
+          // 3900 = the old 3600 + the market-mood bar and the three collapsed fun sections (achievements, trade of the week, calendar).
+          if (h > 3900) out.push(`collapsed dashboard is ${h}px tall (budget 3900 with extreme stub content)`);
           const r = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].map((w) => [w.dataset.dsec, w.querySelector('[data-dsec-toggle]').getAttribute('aria-expanded'), w.querySelector('[data-dsec-toggle]').getBoundingClientRect().height]));
           const open = r.filter((x) => x[1] === 'true').map((x) => x[0]);
           if (open.join() !== 'pos') out.push(`expected only positions open, got ${open.join() || 'none'}`);

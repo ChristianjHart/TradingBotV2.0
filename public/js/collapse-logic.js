@@ -6,6 +6,9 @@ export const SECTIONS = {
   sum: { title: 'AI summary', open: false },
   news: { title: 'News & earnings', open: false },
   sched: { title: 'Schedule', open: false },
+  fun: { title: 'Achievements', open: false },
+  totw: { title: 'Trade of the week', open: false },
+  cal: { title: 'Calendar', open: false },
   budget: { title: 'Budget', open: false },
   picks: { title: 'Top picks', open: false },
   perf: { title: 'Performance', open: false },
@@ -55,6 +58,12 @@ export function sectionSummary(key, d = {}) {
     case 'news':
       return d.text || '';
     case 'sched':
+      return d.text || '';
+    case 'fun':
+      return d.text || '';
+    case 'totw':
+      return d.text || '';
+    case 'cal':
       return d.text || '';
     case 'budget':
       return d.spentText && d.capText ? `${d.spentText} of ${d.capText}` : '';

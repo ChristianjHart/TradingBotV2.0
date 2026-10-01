@@ -13,6 +13,7 @@ import { leftText, resetChartKey } from './positions.js';
 import { isRunning, tickRun } from './run.js';
 import { applySettingsFocus, mountSettings } from './settings.js';
 import { jumpTo } from './ui.js';
+import { bindMood, patchMood } from './mood.js';
 import { $, PAGES, hooks, POLL_MS, TITLES, destroyCharts, setHtml, setText, state } from './state.js';
 
 /* ---------- routing ---------- */
@@ -22,6 +23,7 @@ export function patchCurrent() {
   setWorkerUI(state.status?.worker);
   applyBadge();
   patchBudgetChip();
+  patchMood();
   switch (state.page) {
     case 'dashboard':
       patchDashboard();
@@ -109,6 +111,7 @@ async function startApp() {
 async function boot() {
   hooks.patchCurrent = patchCurrent;
   bindChrome();
+  bindMood();
   initMobile();
   window.addEventListener('hashchange', () => {
     if (state.locked) return; // the route is kept and restored after sign-in

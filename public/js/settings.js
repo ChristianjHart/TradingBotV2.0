@@ -10,7 +10,7 @@ import { mountSchedule } from './schedule.js';
 import { $, hooks, root, state } from './state.js';
 import { confirmDialog, toast } from './ui.js';
 
-const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge', schedule: 'sched-root', news: 'sec-news' };
+const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge', schedule: 'sched-root', news: 'sec-news', persona: 'sec-persona' };
 
 /** Scroll to the section named by `#settings/<section>` (once the page has been mounted). */
 export function applySettingsFocus() {
@@ -35,6 +35,45 @@ function autoCardHtml(s) {
       <label for="aa-ttl">Proposals expire after (hours)<input id="aa-ttl" name="ttl" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${esc(s.proposalTtlHours ?? 6)}" aria-describedby="aa-ttl-h aa-ttl-e" /><span class="fld-hint" id="aa-ttl-h">Between 0.25 and 72. An unapproved proposal expires, and is scored later as a “what if”.</span><span class="fld-err" id="aa-ttl-e" role="alert"></span></label>
       <div class="row-actions"><button class="btn-accent" type="submit">Save</button></div>
     </form></section>`;
+}
+
+function personaCardHtml(s) {
+  const list = state.status?.personas || [];
+  const cur = s.botPersona || 'default';
+  return `<section class="widget persona-card" id="sec-persona" aria-labelledby="h-persona"><h2 class="widget-title" id="h-persona">BOT PERSONALITY</h2>
+    <p class="dim">Pick the voice the trader bot uses for its proposal reasons and run summaries. It only changes the wording: the numbers, the levels and every risk rule stay exactly the same.</p>
+    <div class="persona-grid" role="radiogroup" aria-label="Bot personality">${list
+      .map((x) => `<button type="button" class="persona-opt" role="radio" aria-checked="${x.id === cur}" data-persona="${esc(x.id)}"><span class="persona-em" aria-hidden="true">${esc(x.emoji)}</span><span class="persona-t"><strong>${esc(x.label)}</strong><small>${esc(x.blurb)}</small></span></button>`)
+      .join('')}</div>
+    <div class="persona-sample" id="persona-sample" aria-live="polite"></div></section>`;
+}
+
+function wirePersona() {
+  const host = $('sec-persona');
+  if (!host) return;
+  const list = state.status?.personas || [];
+  const show = (id) => {
+    const x = list.find((y) => y.id === id);
+    $('persona-sample').innerHTML = x ? `<span class="lbl">EXAMPLE, ${esc(x.label.toUpperCase())}</span><p>“${esc(x.sample)}”</p><small class="dim">A fixed example, not real analysis. Applies from the next AI run.</small>` : '';
+  };
+  show(state.status?.settings?.botPersona || 'default');
+  host.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-persona]');
+    if (!b || b.getAttribute('aria-checked') === 'true') return;
+    const id = b.dataset.persona;
+    host.querySelectorAll('[data-persona]').forEach((x) => (x.disabled = true));
+    try {
+      await savePatch({ botPersona: id });
+      host.querySelectorAll('[data-persona]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+      show(id);
+      toast(`Personality set: ${list.find((y) => y.id === id)?.label || id}. It applies from the next AI run.`, 'success');
+      await refresh();
+    } catch (er) {
+      toast(`Could not save: ${er.message}`, 'error');
+    } finally {
+      host.querySelectorAll('[data-persona]').forEach((x) => (x.disabled = false));
+    }
+  });
 }
 
 function edgeCardHtml(s) {
@@ -172,6 +211,7 @@ export function mountSettings() {
       ${state.auth.required && state.auth.mode !== 'session' ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
     </section></div>
     <div class="settings-grid">${newsCardHtml(s)}${edgeCardHtml(s)}</div>
+    <div class="settings-grid">${personaCardHtml(s)}</div>
     <div class="settings-grid account-grid" id="account-root" aria-live="polite"></div></div>`;
   if (state.auth.mode !== 'token') mountAccount($('account-root'));
   mountSchedule($('sched-root')).then(applySettingsFocus);
@@ -180,6 +220,7 @@ export function mountSettings() {
   wireBudgetCard(root);
   wireAuto();
   wireEdge();
+  wirePersona();
   patchBudgetCard();
   $('btn-auth2')?.addEventListener('click', authClick);
   applySettingsFocus();

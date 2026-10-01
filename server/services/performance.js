@@ -1,4 +1,4 @@
-import { calibration, pickAccuracy } from './picks.js';
+import { calibration, calibrationDetail, pickAccuracy } from './picks.js';
 import { shadowStats } from './shadow.js';
 
 export function maxDrawdownPct(curve) {
@@ -69,6 +69,7 @@ export function computePerformance({ positions, snapshots = [], pickRecords = []
     netEdge: +(realizedPnl - w.drawdown * ddUsd + w.avoided * sh.avoidedLoss).toFixed(2),
     netEdgeParts: { realizedPnl, maxDrawdownUsd: ddUsd, avoidedLoss: sh.avoidedLoss, weights: w, formula: 'realizedPnl - drawdown x maxDrawdownUsd + avoided x avoidedLoss' },
     calibration: calibration(pickRecords),
+    calibrationChart: calibrationDetail(pickRecords), // every bucket + Wilson intervals + Brier/gap summary (reliability diagram)
     pickAccuracy: pickAccuracy(pickRecords),
     byBot: {
       ai: botStats(closed.filter((p) => p.source === 'ai')),

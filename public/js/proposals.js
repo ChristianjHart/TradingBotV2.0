@@ -6,6 +6,7 @@ import { aiBlocked } from './ai-logic.js';
 import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
 import { autoRejectText } from './news-logic.js';
+import { handleWhyAct, personaBadge, whyHtml, whySig } from './explain.js';
 
 /* ---------- selectors over state ---------- */
 
@@ -61,7 +62,7 @@ function newsCtxHtml(n) {
 
 const spin = '<span class="spin" aria-hidden="true"></span>';
 
-export function cardHtml(v, busy, msg) {
+export function cardHtml(v, busy, msg, p = null) {
   const side = v.side;
   const expired = v.expired;
   const dis = busy || expired ? 'disabled' : '';
@@ -81,8 +82,9 @@ export function cardHtml(v, busy, msg) {
     <div class="rbar pc-bar" role="img" aria-label="${esc(barLabel)}" style="background:${bar}"><span class="rentry" style="left:${v.entryAt * 100}%"></span></div>
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
     ${newsCtxHtml(v.news)}
+    ${p ? whyHtml(p) : ''}
     ${riskHtml(v)}
-    <p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>
+    <p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''} ${p ? personaBadge(p) : ''}</p>
     <div class="pc-msgs" role="status" aria-live="polite">${msgHtml(msg)}</div>
     <div class="pc-actions">
       <button type="button" class="btn-reject" data-act="reject" ${dis} aria-label="Reject ${esc(v.symbol)} ${side} proposal">${busy === 'reject' ? `${spin} Rejecting…` : 'Reject'}</button>
@@ -92,8 +94,8 @@ export function cardHtml(v, busy, msg) {
 }
 
 /** Signature of everything a card shows except the ticking countdown text, so live polls only touch cards that changed. */
-function sigOf(v, busy, msg) {
-  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status]);
+function sigOf(v, busy, msg, p = null) {
+  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '']);
 }
 
 /** Keyed reconcile: keep untouched card nodes (scroll, expanded text, focus) and replace only the changed ones. */
@@ -176,12 +178,12 @@ function patchPending() {
   }
   host.__eh = null;
   const now = Date.now();
-  const items = list.map((p) => ({ key: String(p.id), v: proposalView(p, now) }));
+  const items = list.map((p) => ({ key: String(p.id), v: proposalView(p, now), p }));
   reconcile(
     host,
     items,
-    (it) => cardHtml(it.v, state.pendingBusy[it.key], state.pendingMsg[it.key]),
-    (it) => sigOf(it.v, state.pendingBusy[it.key], JSON.stringify(state.pendingMsg[it.key] || '')),
+    (it) => cardHtml(it.v, state.pendingBusy[it.key], state.pendingMsg[it.key], it.p),
+    (it) => sigOf(it.v, state.pendingBusy[it.key], JSON.stringify(state.pendingMsg[it.key] || ''), it.p),
   );
 }
 
@@ -425,6 +427,13 @@ function onPendingClick(e) {
     case 'jump':
       jumpTo(b.dataset.target || 'pos-open');
       break;
+    case 'why':
+    case 'debate':
+    case 'debate-redo': {
+      const p = pendingList().find((x) => String(x.id) === id);
+      if (p) handleWhyAct(b.dataset.act, p, patchPending);
+      break;
+    }
     default:
   }
 }
@@ -469,6 +478,7 @@ function historyCard(p) {
     ${sv.tone !== 'none' ? `<div class="whatif whatif-${sv.tone}"><span class="whatif-h">${sv.icon ? `<span aria-hidden="true">${esc(sv.icon)}</span> ` : ''}<strong>${esc(sv.label)}</strong>${sv.amountText ? ` <span class="mono">${esc(sv.amountText)}</span>` : ''}</span>${sv.detail ? `<small>${esc(sv.detail)}</small>` : ''}</div>` : ''}
     ${posLine(p)}
     ${p.reason ? `<div class="clamp">${esc(p.reason)}</div>` : ''}
+    ${whyHtml(p)}
   </article>`;
 }
 
@@ -534,7 +544,20 @@ export function bindProposals() {
       return;
     }
     const pb = e.target.closest('[data-act="pos"]');
-    if (pb) jumpToPosition(pb.dataset.posId);
+    if (pb) return jumpToPosition(pb.dataset.posId);
+    const wb = e.target.closest('[data-act="why"], [data-act="debate"], [data-act="debate-redo"]');
+    const hid = wb?.closest('[data-hid]')?.dataset.hid;
+    const hp = hid && (state.history?.proposals || []).find((x) => String(x.id) === hid);
+    if (hp) {
+      const m = $('prop-history');
+      const keep = m.scrollTop;
+      handleWhyAct(wb.dataset.act, hp, () => {
+        if (m.__h !== undefined) m.__h = null; // force setHtml to repaint
+        patchHistory();
+        m.scrollTop = keep;
+        m.querySelector(`[data-hid="${CSS.escape(hid)}"] [data-act="${wb.dataset.act}"]`)?.focus({ preventScroll: true });
+      });
+    }
   });
   setPropTab(state.propTab);
 }

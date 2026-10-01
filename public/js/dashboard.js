@@ -10,6 +10,9 @@ import { budgetView } from './ai-logic.js';
 import { currentBudget } from './budget.js';
 import { bindNews, newsSectionSummary, patchNews } from './news.js';
 import { patchScheduleWidget, scheduleSectionSummary } from './schedule.js';
+import { gamifySectionSummary, patchGamify } from './gamify.js';
+import { bindTotw, patchTotw } from './highlights.js';
+import { bindCalendar, calendarSectionSummary, patchCalendar } from './calendar.js';
 import { newsRunStatus } from './news-logic.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
@@ -146,6 +149,11 @@ export function mountDashboard() {
     <section class="widget news-card" aria-labelledby="h-news" id="dsec-news" data-dsec="news">${sectionHeadHtml('news')}<h2 class="widget-title" id="h-news"><span>NEWS &amp; EARNINGS</span><span class="dim" id="news-sub"></span></h2><div id="w-news"></div></section>
     <section class="widget sched-widget" aria-labelledby="h-sched-w" id="dsec-sched" data-dsec="sched">${sectionHeadHtml('sched')}<h2 class="widget-title" id="h-sched-w"><span>SCHEDULE</span><a class="dim" href="#settings/schedule">Manage →</a></h2><div id="w-sched"></div></section>
     </div>
+    <div class="grid grid-fun">
+    <section class="widget gm-card" aria-labelledby="h-gm" id="dsec-fun" data-dsec="fun">${sectionHeadHtml('fun')}<h2 class="widget-title" id="h-gm"><span>ACHIEVEMENTS</span><span class="dim">streaks &amp; badges</span></h2><div id="w-gamify"></div></section>
+    <section class="widget totw-card" aria-labelledby="h-totw" id="dsec-totw" data-dsec="totw">${sectionHeadHtml('totw')}<h2 class="widget-title" id="h-totw"><span>TRADE OF THE WEEK</span><span class="dim">best closed trade, last 7 days</span></h2><div id="w-totw"></div></section>
+    <section class="widget cal-card" aria-labelledby="h-cal" id="dsec-cal" data-dsec="cal">${sectionHeadHtml('cal')}<h2 class="widget-title" id="h-cal"><span>EARNINGS &amp; EVENTS</span><span class="dim">next 3 weeks</span></h2><div id="w-cal"></div></section>
+    </div>
     <div class="grid grid-top">
       <section class="widget ai-summary" aria-labelledby="h-sum" id="dsec-sum" data-dsec="sum">${sectionHeadHtml('sum')}<h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
       <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w" data-dsec="budget">${sectionHeadHtml('budget')}<h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
@@ -190,6 +198,8 @@ export function mountDashboard() {
   setRerun(startRun);
   bindProposals();
   bindNews();
+  bindTotw();
+  bindCalendar();
   const pw = $('pos-open').parentElement;
   pw.addEventListener('click', posClick);
   pw.addEventListener('change', posChange);
@@ -220,6 +230,9 @@ export function patchDashboard() {
   patchProposals();
   patchNews();
   patchScheduleWidget();
+  patchGamify();
+  patchTotw();
+  patchCalendar();
   setHtml($('w-acc'), accuracyHtml());
   setHtml($('sys-strip'), sysStripHtml());
   const st = state.picks;
@@ -251,6 +264,9 @@ function sectionData() {
     sum: { proposalCount: state.summary?.at ? state.summary.proposalCount ?? state.summary.proposals?.length ?? 0 : null },
     news: { text: newsSectionSummary() },
     sched: { text: scheduleSectionSummary() },
+    fun: { text: gamifySectionSummary() },
+    totw: { text: state.totw?.trade ? `${state.totw.trade.symbol} ${state.totw.trade.pnl >= 0 ? '+' : '-'}$${Math.abs(Math.round(state.totw.trade.pnl))}` : 'none yet' },
+    cal: { text: calendarSectionSummary() },
     budget: { spentText: bv?.spentText, capText: bv?.capText },
     picks: { picksCount: state.loaded ? state.picks?.picks?.length || 0 : null },
     perf: { netEdge: p?.netEdge == null ? NaN : Number(p.netEdge), closed },

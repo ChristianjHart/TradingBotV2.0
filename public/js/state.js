@@ -21,6 +21,13 @@ export const state = {
   proposals: null, // {proposals:[pending…], counts}
   history: null, // {proposals:[decided…], counts} (loaded lazily when the History tab is open)
   budget: null, // full /api/budget
+  gamify: null, // /api/gamify: streaks + badges
+  totw: null, // /api/trade-of-the-week
+  calendar: null, // /api/calendar
+  mood: null, // /api/mood
+  why: {}, // proposal id -> true when its "Why this pick?" panel is open
+  debateUi: {}, // proposal id -> { busy, error } for the bull/bear debate request
+  debateLocal: {}, // proposal id -> debate just received (shown until the next poll carries it)
   propTab: 'pending',
   pendingBusy: {}, // proposal id -> 'approve' | 'reject'
   pendingMsg: {}, // proposal id -> {tone,title,message,actions} shown inline on the card

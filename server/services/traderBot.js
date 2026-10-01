@@ -10,6 +10,7 @@ import { sizeTrade, MAX_POSITION_PCT } from './sizing.js';
 import { createProposals, autoApproveProposals } from './proposals.js';
 import { MOCK_MODEL } from './mockLlm.js';
 import { newsGuard } from './newsNotes.js';
+import { personaOf, voiceInstruction } from './personas.js';
 
 const SYSTEM = `You are a disciplined risk-aware trading desk. You receive screened candidates (with price and ATR% = hourly average true range as % of price), the account state, and the number of free position slots.
 You only PROPOSE trades: a human reviews and approves each one, so be selective and explain each proposal in one sentence. Decide which candidates are actually worth trading and choose AT MOST the given number of slots. For each trade give: symbol, side ("long" or "short"), allocationUsd (dollars of the account to commit), stopLoss (a price that exits the trade if it moves against us, so we never lose the whole allocation), takeProfit (a price at which we lock in the gain), and a one-sentence reason.
@@ -56,7 +57,7 @@ const none = (extra) => ({ source: 'none', model: null, proposals: [], proposalC
  * Never opens a position (unless the owner turned on autoApprove, and then only through the full approval path).
  * Throws AiError when the AI cannot run; nothing is guessed or substituted.
  */
-export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`, scannerModel = null, notes = [] } = {}) {
+export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`, scannerModel = null, notes = [], features = null } = {}) {
   const noteBy = new Map((Array.isArray(notes) ? notes : []).map((n) => [n.symbol, n]));
   const open = store.getPositions().filter((p) => p.status === 'open');
   const slots = Math.max(0, config.maxOpenPositions - open.length);
@@ -88,11 +89,13 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     return none({ note, halted: true, reasonCode: 'daily_loss_halt' });
   }
 
+  const persona = personaOf(settings);
   const ai = await chatJson({
     bot: 'trader',
     model: config.openrouter.traderModel,
-    system: SYSTEM,
+    system: SYSTEM + voiceInstruction(persona),
     user: JSON.stringify({
+      ...(persona.style ? { voice: persona.id } : {}),
       account: { equity: account.equity, cash: account.cash },
       freeSlots: slots,
       regime: regime?.line,
@@ -172,7 +175,7 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     }
     const note = noteBy.get(t.symbol);
     const guard = newsGuard(note, settings);
-    const item = { ...sized, symbol: t.symbol, side: t.side, atrPct: c.atrPct, confidence: c.confidence, reason: t.reason || c.reason, note };
+    const item = { ...sized, symbol: t.symbol, side: t.side, atrPct: c.atrPct, confidence: c.confidence, reason: t.reason || c.reason, scannerReason: c.reason, note, setup: features?.get?.(t.symbol) ?? null };
     if (guard.block) {
       blocked.push({ ...item, blockReason: guard.reason });
       skipped.push(`${t.symbol} (${guard.reason})`);
@@ -186,7 +189,7 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     note = `${note}${note ? ' ' : ''}[levels replaced: ${adjusted.join('; ')}]`.slice(0, 1500);
     store.addLog({ level: 'info', message: `trader bot replaced levels: ${adjusted.join('; ')}` });
   }
-  const created = items.length || blocked.length ? createProposals({ runId, items, blocked, source, models: { scanner: scannerModel, trader: model } }) : [];
+  const created = items.length || blocked.length ? createProposals({ runId, items, blocked, source, models: { scanner: scannerModel, trader: model }, persona: persona.id, regime: regime?.line ?? null }) : [];
   const proposals = created.filter((p) => p.status === 'pending');
   const newsBlocked = created.filter((p) => p.status === 'rejected');
   for (const p of newsBlocked) store.addLog({ level: 'info', message: `news guard auto-rejected ${p.side.toUpperCase()} ${p.symbol}: ${p.rejectReason}` });
@@ -208,5 +211,6 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     note,
     usage: ai.usage,
     repaired: ai.repaired,
+    persona: persona.id,
   };
 }

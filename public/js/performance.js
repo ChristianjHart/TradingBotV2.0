@@ -2,7 +2,8 @@ import { api, apiOptional, clsPos, escapeHtml as esc, fmtDateTime, fmtMoney } fr
 import { LineChart } from './charts.js';
 import { bannersHtml } from './dashboard.js';
 import { baselineVerdicts, MIN_BASELINE_N } from './ai-logic.js';
-import { calibrationBar } from './run-logic.js';
+import { reliabilitySvg } from './fun-logic.js';
+import { mountWhatif, whatifShellHtml } from './whatif.js';
 import { $, charts, empty, pctOf, root, setHtml, skeleton, state } from './state.js';
 
 /* ---------- performance ---------- */
@@ -74,18 +75,7 @@ export function patchPerf() {
   const curve = (p.equityCurve || []).map((e) => ({ t: e.t, v: e.equity }));
   charts.equity.set(curve, { baseline: Number.isFinite(start) && start > 0 ? start : curve[0]?.v });
 
-  const cal = p.calibration || [];
-  setHtml(
-    $('perf-calib'),
-    cal.length
-      ? `<ul class="calib">${cal
-          .map((c) => {
-            const { mid, hitRate: hr } = calibrationBar(c);
-            return `<li><span class="calib-l mono">${esc(c.bucket)}</span><span class="calib-bar" role="img" aria-label="${esc(c.bucket)} confidence: hit rate ${hr.toFixed(0)}% over ${c.n} picks"><span class="calib-fill" style="width:${Math.min(100, hr)}%"></span>${mid != null ? `<span class="calib-ideal" style="left:${mid}%" title="Perfect calibration"></span>` : ''}</span><span class="calib-v mono">${hr.toFixed(0)}% <span class="dim">n=${c.n}</span></span></li>`;
-          })
-          .join('')}</ul><div class="dim calib-note">Bar = actual hit rate; tick = stated confidence. Bars left of the tick mean the model is overconfident.</div>`
-      : empty('Not enough scored picks yet'),
-  );
+  setHtml($('perf-calib'), calibrationHtml(p));
   setHtml($('perf-edge'), edgeHtml(p));
   setHtml($('perf-approval'), approvalHtml(p));
   setHtml($('perf-base'), baselinesHtml(p));
@@ -95,6 +85,24 @@ export function patchPerf() {
 }
 
 const signed = (n) => (n == null ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmtMoney(Math.abs(n), 2)}`);
+
+/** Reliability diagram (stated confidence vs actual hit rate) with a plain-language verdict and an accessible table. */
+export function calibrationHtml(p) {
+  const ch = p.calibrationChart;
+  const sm = ch?.summary;
+  if (!sm || !sm.n) return empty('Not enough scored picks yet');
+  const pc = (x) => (x == null ? '—' : `${(x * 100).toFixed(0)}%`);
+  const better = sm.brier != null && sm.brierBaseline != null && sm.brier < sm.brierBaseline;
+  return `<div class="rel">
+    <div class="rel-chart">${reliabilitySvg(ch, { size: Math.round(Math.min(340, Math.max(240, $('perf-calib')?.clientWidth || 300))) })}</div>
+    <div class="rel-side">
+      <p class="rel-verdict rel-${esc(sm.verdict)}"><strong>${esc(sm.verdictText)}</strong></p>
+      <dl class="rel-stats"><div><dt>Says on average</dt><dd class="mono">${pc(sm.avgConfidence)}</dd></div><div><dt>Actually right</dt><dd class="mono">${pc(sm.hitRate)}</dd></div><div><dt>Brier score</dt><dd class="mono">${sm.brier == null ? '—' : sm.brier.toFixed(3)}</dd><small class="dim">${better ? 'beats' : 'does not beat'} always guessing the base rate (${sm.brierBaseline == null ? '—' : sm.brierBaseline.toFixed(3)}); lower is better</small></div></dl>
+      <p class="dim calib-note"><span class="rel-key rel-under" aria-hidden="true"></span> on or above the diagonal: it delivers at least what it claims. <span class="rel-key rel-over" aria-hidden="true"></span> below: overconfident. Bar = 95% range; bigger dot = more picks.</p>
+    </div>
+    <table class="sr-only"><caption>Calibration by confidence bucket</caption><thead><tr><th scope="col">Confidence</th><th scope="col">Picks</th><th scope="col">Actual hit rate</th></tr></thead><tbody>${ch.buckets.filter((b) => b.n > 0).map((b) => `<tr><th scope="row">${esc(b.bucket)}</th><td>${b.n}</td><td>${pc(b.hitRate)}</td></tr>`).join('')}</tbody></table>
+  </div>`;
+}
 
 /** Net edge hero with its breakdown, avoided loss and missed gain. */
 export function edgeHtml(p) {
@@ -153,8 +161,10 @@ export function mountPerformance() {
   root.innerHTML = `<div class="page">
     <div id="banners"></div>
     <section class="widget perf-section" aria-labelledby="h-perf"><h2 class="widget-title" id="h-perf">PERFORMANCE</h2>${perfShellHtml()}</section>
+    ${whatifShellHtml()}
     <section class="widget" style="margin-top:12px" aria-labelledby="h-runs"><h2 class="widget-title" id="h-runs">RUN HISTORY</h2><div id="runs"></div></section>
   </div>`;
+  mountWhatif();
   patchPerformancePage();
   loadRuns();
 }

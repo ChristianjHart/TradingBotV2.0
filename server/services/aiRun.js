@@ -12,6 +12,7 @@ import { expireProposals } from './proposals.js';
 import { AiError, stageFor, isAiError } from './aiErrors.js';
 import { mockLlmEnabled } from './mockLlm.js';
 import { budgetStatus, estimateCallCostUsd } from './spend.js';
+import { setupOf } from './debate.js';
 
 const log = (msg) => console.log(`[run] ${msg}`);
 
@@ -133,7 +134,8 @@ export function startAiRun({ trigger } = {}) {
       runState.news = newsRes.news;
       log(`news bot → ${newsRes.news.status}${newsRes.news.reason && newsRes.news.status !== 'ok' ? ` (${newsRes.news.reason})` : ''} (${lap()})`);
       runState.stage = 'trading';
-      const trades = await runTraderBot(scan.picks, { regime, runId, scannerModel: scan.model, notes: newsRes.notes });
+      const features = new Map(data.map((d) => [d.symbol, setupOf(d.row)]));
+      const trades = await runTraderBot(scan.picks, { regime, runId, scannerModel: scan.model, notes: newsRes.notes, features });
       addUsage(trades.usage);
       runState.proposals = trades.proposalCount;
       runState.autoApproved = trades.autoApproved.length;
@@ -149,6 +151,7 @@ export function startAiRun({ trigger } = {}) {
         regime: regime?.line || null,
         traderSource: trades.source,
         traderModel: trades.model || null,
+        persona: trades.persona ?? null,
         demo: runState.demo,
         trigger: trig,
         proposed: trades.proposed ?? 0, // how many trades the model suggested

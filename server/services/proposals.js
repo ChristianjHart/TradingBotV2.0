@@ -52,7 +52,7 @@ export function patchProposal(id, patch) {
  * Store the proposals of one run. `items` are fully sized trades (see traderBot). Older still-pending proposals for the SAME
  * symbols become 'superseded'. Returns the stored proposals.
  */
-export function createProposals({ runId, items, blocked = [], source, models, ttlHours }) {
+export function createProposals({ runId, items, blocked = [], source, models, ttlHours, persona = 'default', regime = null }) {
   const ttl = Number(ttlHours) > 0 ? Number(ttlHours) : store.getSettings().proposalTtlHours || config.ai.proposalTtlHours;
   const now = Date.now();
   const toRow = (t, blockReason) => ({
@@ -70,6 +70,10 @@ export function createProposals({ runId, items, blocked = [], source, models, tt
     atrPct: t.atrPct ?? null,
     confidence: t.confidence ?? null,
     reason: String(t.reason || '').slice(0, 300),
+    scannerReason: t.scannerReason ? String(t.scannerReason).slice(0, 300) : null, // why the scanner picked it (the trader's reason is separate)
+    setup: t.setup ?? null, // compact feature snapshot at proposal time (momentum, RSI, relative strength...) for the "why this pick" panel
+    regime, // market regime line at proposal time
+    persona, // voice the trader bot wrote in (cosmetic)
     source, // 'ai' | 'demo'
     models: { scanner: models?.scanner ?? null, trader: models?.trader ?? null },
     status: 'pending',

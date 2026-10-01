@@ -89,3 +89,47 @@ export function pickStats(records, openCount = 0) {
     source: 'scanner-picks',
   };
 }
+
+/** Wilson 95% interval for a hit rate (stays inside 0..1 and is honest about tiny samples). */
+export function wilson(hits, n, z = 1.96) {
+  if (!n) return null;
+  const p = hits / n;
+  const d = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / d;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return [+Math.max(0, centre - half).toFixed(4), +Math.min(1, centre + half).toFixed(4)];
+}
+
+/**
+ * Data for the reliability diagram: every confidence bucket (including empty ones, so the axis is stable) with its midpoint, hit rate
+ * and Wilson interval, plus an overall summary (avg stated confidence vs actual hit rate, Brier score, verdict).
+ * gap > 0 means the model is OVERconfident (says more than it delivers).
+ */
+export function calibrationDetail(records, { minForVerdict = 30 } = {}) {
+  const rows = scoredOnly(records);
+  const buckets = BUCKETS.map(([lo, hi, bucket]) => {
+    const inB = rows.filter((r) => r.confidence >= lo && r.confidence < hi);
+    const hits = inB.filter((r) => r.hit).length;
+    return { bucket, lo, hi: Math.min(hi, 1), mid: +((lo + Math.min(hi, 1)) / 2).toFixed(3), n: inB.length, hits, hitRate: inB.length ? +(hits / inB.length).toFixed(4) : null, ci: wilson(hits, inB.length) };
+  });
+  const n = rows.length;
+  if (!n) return { buckets, summary: { n: 0, avgConfidence: null, hitRate: null, gap: null, brier: null, brierBaseline: null, verdict: 'none', verdictText: 'No scored picks yet.' } };
+  const avgConfidence = rows.reduce((s, r) => s + r.confidence, 0) / n;
+  const hits = rows.filter((r) => r.hit).length;
+  const hitRate = hits / n;
+  const gap = avgConfidence - hitRate;
+  const brier = rows.reduce((s, r) => s + (r.confidence - (r.hit ? 1 : 0)) ** 2, 0) / n;
+  const brierBaseline = hitRate * (1 - hitRate); // Brier of always saying "the base rate": the score to beat
+  let verdict = 'calibrated';
+  if (n < minForVerdict) verdict = 'small';
+  else if (gap > 0.08) verdict = 'overconfident';
+  else if (gap < -0.08) verdict = 'underconfident';
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const verdictText = {
+    small: `Only ${n} scored pick${n === 1 ? '' : 's'}: treat this as anecdotal until there are ${minForVerdict}+.`,
+    overconfident: `Overconfident: it claims ${pct(avgConfidence)} on average but is right ${pct(hitRate)} of the time.`,
+    underconfident: `Underconfident: it claims ${pct(avgConfidence)} on average but is right ${pct(hitRate)} of the time.`,
+    calibrated: `Well calibrated: it claims ${pct(avgConfidence)} on average and is right ${pct(hitRate)} of the time.`,
+  }[verdict];
+  return { buckets, summary: { n, avgConfidence: +avgConfidence.toFixed(4), hitRate: +hitRate.toFixed(4), gap: +gap.toFixed(4), brier: +brier.toFixed(4), brierBaseline: +brierBaseline.toFixed(4), verdict, verdictText } };
+}
