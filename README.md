@@ -132,6 +132,10 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 
 `/api/dashboard` remains as a slim summary (accuracy, worker, logs). The legacy `/watchlist`, `/predictions`, `/accuracy`, `/model`, `/scan`, `/train`, `/evaluate` endpoints were removed.
 
+## Dashboard layout
+
+Proposals stay open at the top. Every other block is a one-line section with a summary (for example "net edge +$1,528"). **Positions** is the only section open by default. Use the arrow on a section, or **Collapse all / Expand all**, to change this. The choice is saved in your browser. In the calendar, each day also folds. News shows 4 notes first, the dashboard performance block shows headline numbers and the equity chart (full tables live on the Performance page), and each proposal card folds its risk numbers behind one line. Copy rules are in [`docs/COPY-STYLE.md`](docs/COPY-STYLE.md).
+
 ## Fun features
 
 All of these are read-only helpers: none of them can open a position or loosen a risk rule.

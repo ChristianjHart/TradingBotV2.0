@@ -18,7 +18,7 @@ const FLAG_HELP = {
   guidance_risk: 'The company may change its outlook',
   legal: 'Lawsuit or investigation news',
   regulatory: 'Regulator or government action',
-  halt: 'Trading halted or suspended',
+  halt: 'The exchange paused trading in this stock',
   offering: 'New shares being sold (dilution)',
   macro: 'A market-wide event affects it',
   rumor: 'Unconfirmed reports',

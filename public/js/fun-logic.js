@@ -87,7 +87,7 @@ export function whatifBody(ui) {
 }
 
 export function whatifVerdict(res) {
-  if (!res || !res.replayed) return { tone: 'none', text: 'Nothing to replay yet: it needs decided proposals old enough to have finished, with price history still available.' };
+  if (!res || !res.replayed) return { tone: 'none', text: 'Nothing to replay yet. The replay needs decided proposals that already ended and still have price history.' };
   if (res.unchanged) return { tone: 'neutral', text: 'These are the real rules. Move a slider to see what would have changed.' };
   const d = res.delta.pnl;
   const n = res.replayed;

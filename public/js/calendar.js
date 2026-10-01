@@ -7,33 +7,30 @@ import { $, empty, setHtml, skeleton, state } from './state.js';
 const ICON = { macro: '🏛️', earnings: '📊', market: '🔒' };
 const TAG = { position: 'YOU HOLD IT', proposal: 'PROPOSED', pick: 'SCANNER PICK', macro: '', market: '' };
 
-let showAll = false;
-const LIMIT = 8;
+const OPEN_DAYS = 2; // the next two days that have events start open; later days start folded
+let dayOpen = {}; // date -> true/false once the owner toggled that day
 
 export function calendarHtml() {
   if (!state.loaded) return skeleton(3);
   const cal = state.calendar;
-  if (!cal) return empty('The calendar is not available from the server yet.');
+  if (!cal) return empty('Calendar data is not available yet.');
   const groups = calendarGroups(cal);
-  const total = groups.reduce((n, g) => n + g.events.length, 0);
-  const rows = [];
-  let shown = 0;
-  for (const g of groups) {
-    if (!showAll && shown >= LIMIT) break;
-    const evs = showAll ? g.events : g.events.slice(0, LIMIT - shown);
-    shown += evs.length;
-    rows.push(`<div class="cal-day"><h3 class="cal-date">${esc(g.label)} <span class="dim">· ${esc(g.rel)}</span></h3><ul class="cal-list">${evs
-      .map((e) => `<li class="cal-ev cal-${esc(e.kind)} cal-imp-${esc(e.impact)}"><span class="cal-ic" aria-hidden="true">${ICON[e.kind] || '•'}</span><div class="cal-body"><div class="cal-t"><strong>${esc(e.title)}</strong>${(e.tags || []).filter((t) => TAG[t]).map((t) => `<span class="chip chip-${t === 'position' ? 'warn' : 'off'} cal-tag">${esc(TAG[t])}</span>`).join('')}${e.approx ? '<span class="chip chip-off cal-tag">APPROX.</span>' : ''}</div><small class="dim">${esc(e.detail)}</small></div></li>`)
-      .join('')}</ul></div>`);
-  }
+  const rows = groups.map((g, i) => {
+    const open = dayOpen[g.date] ?? i < OPEN_DAYS;
+    const n = g.events.length;
+    const list = open
+      ? `<ul class="cal-list">${g.events
+          .map((e) => `<li class="cal-ev cal-${esc(e.kind)} cal-imp-${esc(e.impact)}"><span class="cal-ic" aria-hidden="true">${ICON[e.kind] || '•'}</span><div class="cal-body"><div class="cal-t"><strong>${esc(e.title)}</strong>${(e.tags || []).filter((t) => TAG[t]).map((t) => `<span class="chip chip-${t === 'position' ? 'warn' : 'off'} cal-tag">${esc(TAG[t])}</span>`).join('')}${e.approx ? '<span class="chip chip-off cal-tag">APPROX.</span>' : ''}</div><small class="dim">${esc(e.detail)}</small></div></li>`)
+          .join('')}</ul>`
+      : '';
+    return `<div class="cal-day"><h3 class="cal-date"><button type="button" class="cal-dtoggle" data-cal-day="${esc(g.date)}" aria-expanded="${open}"><span>${esc(g.label)} <span class="dim">· ${esc(g.rel)}</span></span><span class="dim cal-n">${n} ${n === 1 ? 'event' : 'events'}</span><svg class="dsec-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h3>${list}</div>`;
+  });
   const notes = [];
-  if (!cal.earningsAvailable) notes.push(`Earnings dates are off: ${cal.earningsError === 'no Finnhub key' ? 'add a Finnhub key under <a class="prop-link" href="#settings/account">Settings → Account</a>' : esc(cal.earningsError || 'the lookup failed')}.`);
-  else if (!cal.watched) notes.push('Earnings are shown for what you hold, what is proposed and the scanner’s top picks. Run the AI once to fill that list.');
-  if (!cal.macroCovered) notes.push(`The built-in macro list only covers ${esc(cal.macroListYears.join(', '))}; later dates are missing.`);
-  notes.push('FOMC dates come from a built-in list and the jobs report date is the usual first Friday: verify both before relying on them.');
-  return `${rows.length ? rows.join('') : '<div class="empty">Nothing scheduled in the next few weeks that this calendar tracks.</div>'}
-    ${total > LIMIT ? `<button type="button" class="btn-ghost cal-more" id="cal-more" aria-pressed="${showAll}">${showAll ? 'Show fewer' : `Show all ${total} events`}</button>` : ''}
-    <p class="dim cal-note">${notes.join(' ')}</p>`;
+  if (!cal.earningsAvailable) notes.push(`No earnings dates: ${cal.earningsError === 'no Finnhub key' ? 'add a Finnhub key in <a class="prop-link" href="#settings/account">Settings</a>' : esc(cal.earningsError || 'the lookup failed')}.`);
+  else if (!cal.watched) notes.push('Earnings show for your positions, proposals and top picks. Run the AI to fill the list.');
+  if (!cal.macroCovered) notes.push(`The built-in macro list covers only ${esc(cal.macroListYears.join(', '))}.`);
+  notes.push('Check FOMC and jobs-report dates before you rely on them. The app has a fixed list.');
+  return `${rows.length ? rows.join('') : '<div class="empty">No events in the next few weeks.</div>'}<p class="dim cal-note">${notes.join(' ')}</p>`;
 }
 
 export function patchCalendar() {
@@ -42,9 +39,11 @@ export function patchCalendar() {
 
 export function bindCalendar() {
   $('w-cal')?.addEventListener('click', (e) => {
-    if (!e.target.closest('#cal-more')) return;
-    showAll = !showAll;
+    const b = e.target.closest('[data-cal-day]');
+    if (!b) return;
+    dayOpen[b.dataset.calDay] = b.getAttribute('aria-expanded') !== 'true';
     patchCalendar();
+    $('w-cal').querySelector(`[data-cal-day="${CSS.escape(b.dataset.calDay)}"]`)?.focus({ preventScroll: true });
   });
 }
 

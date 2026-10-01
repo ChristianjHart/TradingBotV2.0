@@ -8,9 +8,9 @@ import { toast } from './ui.js';
 export function totwHtml() {
   if (!state.loaded) return skeleton(3);
   const r = state.totw;
-  if (!r) return empty('Trade of the week is not available from the server yet.');
+  if (!r) return empty('No data yet.');
   const t = r.trade;
-  if (!t) return empty(r.candidates ? 'No profitable closed trade in the last 7 days yet. A winner will land here.' : 'No closed trades in the last 7 days yet. Approve a few proposals and check back.');
+  if (!t) return empty(r.candidates ? 'No winning closed trade in the last 7 days.' : 'No closed trades in the last 7 days.');
   const rl = ruler(t);
   const mark = (cls, at, label) => (at == null ? '' : `<span class="tw-mark ${cls}" style="left:${at}%" title="${esc(label)}"><span class="tw-tag">${esc(label)}</span></span>`);
   const long = t.side !== 'short';

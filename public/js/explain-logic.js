@@ -35,9 +35,9 @@ export function setupSignals(setup, side) {
     let text = `RSI ${r.toFixed(0)}: middle of the range, no extreme`;
     if (dir > 0) {
       if (r >= 75) [stance, text] = ['against', `RSI ${r.toFixed(0)}: overbought, a long may be late`];
-      else if (r >= 50) [stance, text] = ['for', `RSI ${r.toFixed(0)}: healthy strength without being stretched`];
+      else if (r >= 50) [stance, text] = ['for', `RSI ${r.toFixed(0)}: strong, but not stretched`];
     } else if (r <= 25) [stance, text] = ['against', `RSI ${r.toFixed(0)}: oversold, a short may be late`];
-    else if (r <= 50) [stance, text] = ['for', `RSI ${r.toFixed(0)}: weak without being washed out`];
+    else if (r <= 50) [stance, text] = ['for', `RSI ${r.toFixed(0)}: weak, but not washed out`];
     out.push({ id: 'rsi', label: 'RSI', value: r.toFixed(0), stance, text });
   }
   if (fin(setup.volRatio)) {
@@ -97,7 +97,7 @@ export function explainView(p, { calendar = null } = {}) {
   if (rr !== null && rr < 1.5) caution.push(`Reward-to-risk is only ${rr.toFixed(1)} to 1`);
   const headline = signals.length
     ? `${tally.for} of ${signals.length} signals support this ${side}${tally.against ? `, ${tally.against} conflict` : ''}`
-    : 'No technical snapshot was saved with this proposal (it predates the feature), so only the AI’s own reasoning is shown.';
+    : 'This proposal has no saved signals because it is older than this feature. Only the AI’s reasoning shows.';
   return {
     side,
     hasSetup: signals.length > 0,
@@ -136,10 +136,10 @@ export function debateView(d) {
 
 export const DEBATE_ERRORS = {
   no_api_key: 'Add your OpenRouter key under Settings → Account to run a debate.',
-  budget_exhausted: 'The monthly AI budget is used up, so the debate was not run.',
-  rate_limited: 'The model is rate limited right now. Try again in a minute.',
-  model_unavailable: 'The trader model is unavailable. Pick another under Settings → Models.',
-  invalid_output: 'The model returned something unusable twice. Nothing was saved.',
+  budget_exhausted: 'You used all of this month’s AI budget, so the debate did not run.',
+  rate_limited: 'The model is rate limited. Try again in one minute.',
+  model_unavailable: 'The trader model is unavailable. Pick another in Settings → Models.',
+  invalid_output: 'The model gave an unusable answer twice. The app saved nothing.',
   timeout: 'The model took too long. Try again.',
   upstream_error: 'Could not reach the model. Try again.',
 };

@@ -15,18 +15,18 @@ const TRY_MODEL = { id: 'link', label: 'Try another model', href: '#settings/mod
 const RETRY = { id: 'retry', label: 'Retry run' };
 
 const RUN_PROBLEMS = {
-  no_api_key: { title: 'AI can’t run: no OpenRouter key', message: 'The scanner and trader are AI bots and need your OpenRouter key. Nothing ran, no trades were proposed.', actions: [SETTINGS_ACCOUNT] },
+  no_api_key: { title: 'No OpenRouter key', message: 'The AI needs your OpenRouter key. Nothing ran. The AI proposed no trades.', actions: [SETTINGS_ACCOUNT] },
   budget_exhausted: {
     title: 'Monthly AI budget used up',
-    message: 'The AI spend cap for this month has been reached, so the run was blocked. Nothing ran and nothing changed. The budget resets at the start of next month, or you can raise the cap.',
+    message: 'You reached this month’s AI spending cap. The run did not start and nothing changed. The budget resets next month. You can also raise the cap.',
     actions: [{ id: 'link', label: 'Raise the cap', href: '#settings/budget' }],
   },
-  rate_limited: { title: 'The AI model is rate-limited', message: 'OpenRouter is throttling this model (common with free models). Wait a minute and retry, or pick another model.', actions: [TRY_MODEL, RETRY] },
+  rate_limited: { title: 'AI model is rate limited', message: 'OpenRouter is slowing this model. Free models often have this problem. Wait one minute and retry, or pick another model.', actions: [TRY_MODEL, RETRY] },
   timeout: { title: 'The AI took too long', message: 'The model did not answer in time. Retry, or pick a faster model.', actions: [TRY_MODEL, RETRY] },
-  model_unavailable: { title: 'The AI model is unavailable', message: 'OpenRouter reports that this model is not available right now (removed, overloaded, or not allowed for your key). Pick another model.', actions: [TRY_MODEL, RETRY] },
-  upstream_error: { title: 'OpenRouter returned an error', message: 'The AI provider failed while serving the request. Retry, or pick another model.', actions: [TRY_MODEL, RETRY] },
-  invalid_output: { title: 'The AI gave an unusable answer', message: 'The model replied, but not in a form that could be used, so no proposals were made. Retrying usually works.', actions: [RETRY, TRY_MODEL] },
-  run_failed: { title: 'The run failed', message: 'Something went wrong while running the pipeline. Nothing was proposed or opened.', actions: [RETRY] },
+  model_unavailable: { title: 'AI model unavailable', message: 'OpenRouter says this model is not available now. It may be removed, busy, or blocked for your key. Pick another model.', actions: [TRY_MODEL, RETRY] },
+  upstream_error: { title: 'OpenRouter returned an error', message: 'The AI provider failed on this request. Retry, or pick another model.', actions: [TRY_MODEL, RETRY] },
+  invalid_output: { title: 'The AI gave an unusable answer', message: 'The model answered in a form the app cannot use, so it made no proposals. A retry usually works.', actions: [RETRY, TRY_MODEL] },
+  run_failed: { title: 'The run failed', message: 'Something went wrong. The AI proposed and opened nothing.', actions: [RETRY] },
 };
 
 /**
@@ -60,7 +60,7 @@ export function aiBlocked(ai) {
   if (ai.blockedReason === 'no_api_key' || !ai.blockedReason) {
     return { code: 'no_api_key', reason: 'Add your OpenRouter key to run the AI', message: RUN_PROBLEMS.no_api_key.message, actions: [{ ...SETTINGS_ACCOUNT }] };
   }
-  return { code: ai.blockedReason, reason: 'The AI can’t run right now', message: 'The AI is not ready to run.', actions: [] };
+  return { code: ai.blockedReason, reason: 'The AI cannot run now', message: 'The AI is not ready.', actions: [] };
 }
 
 /** Text for the post-run line: never implies anything opened by itself. */
@@ -68,9 +68,9 @@ export function runDoneText(run, pending = null) {
   const n = Number(run?.proposals) || 0;
   const auto = Number(run?.autoApproved) || 0;
   const picks = Number(run?.picks) || 0;
-  if (n > 0 && pending === 0) return `Done: ${picks} picks scanned, ${n} ${n === 1 ? 'proposal was' : 'proposals were'} made; none are waiting now (all decided)`;
-  let s = n === 0 ? `Done: ${picks} picks scanned, the AI proposed no trades` : `Done: ${picks} picks scanned, ${n} ${n === 1 ? 'proposal is' : 'proposals are'} waiting for your approval`;
-  if (auto > 0) s += ` (${auto} more auto-approved within your caps)`;
+  if (n > 0 && pending === 0) return `Done. ${picks} picks scanned. ${n} ${n === 1 ? 'proposal' : 'proposals'} made. All decided.`;
+  let s = n === 0 ? `Done. ${picks} picks scanned. No trades proposed.` : `Done. ${picks} picks scanned. ${n} ${n === 1 ? 'proposal' : 'proposals'} waiting for you.`;
+  if (auto > 0) s += ` ${auto} more auto-approved within your caps.`;
   return s;
 }
 
@@ -91,31 +91,31 @@ export function approveProblem(err, symbol = '') {
   const rerun = { id: 'rerun', label: 'Re-run the AI' };
   switch (code) {
     case 'expired':
-      return { code, tone: 'warn', title: 'Proposal expired', message: `${sym}this proposal expired before it was approved, so nothing opened. Re-run the AI for a fresh one.`, refresh: true, actions: [rerun] };
+      return { code, tone: 'warn', title: 'Proposal expired', message: `${sym}This proposal expired before you approved it. Nothing opened. Re-run the AI for a new one.`, refresh: true, actions: [rerun] };
     case 'price_moved': {
       const drift = Number(d.driftPct);
       const lim = Number(d.thresholdPct);
       const old = d.proposalEntry != null ? money(d.proposalEntry) : '?';
       const fresh = d.freshPrice != null ? money(d.freshPrice) : '?';
       const moved = Number.isFinite(drift) ? ` (${drift > 0 ? '+' : ''}${drift.toFixed(2)}%${Number.isFinite(lim) ? `, limit ${lim}%` : ''})` : '';
-      return { code, tone: 'warn', title: 'Price moved', message: `${sym}the price moved since the AI proposed it: ${old} then, ${fresh} now${moved}. Nothing opened. Re-run the AI to get a fresh proposal at today’s price.`, refresh: false, actions: [rerun] };
+      return { code, tone: 'warn', title: 'Price moved', message: `${sym}The price moved after the AI proposed it: ${old} then, ${fresh} now${moved}. Nothing opened. Re-run the AI for a new proposal at today’s price.`, refresh: false, actions: [rerun] };
     }
     case 'risk_blocked':
       return { code, tone: 'warn', title: 'Blocked by risk limits', message: `${sym}${d.reason ? String(d.reason) : err?.message || 'a risk limit would be exceeded'}. Nothing opened. Close a position or reject this proposal.`, refresh: true, actions: [] };
     case 'stale_quote':
-      return { code, tone: 'warn', title: 'Market data unavailable', message: `${sym}no fresh price${d.symbol && d.symbol !== symbol ? ` for ${d.symbol}` : ''}: the market is probably closed or the data feed is down. Nothing opened. Try again when the market is open.`, refresh: false, actions: [] };
+      return { code, tone: 'warn', title: 'Market data unavailable', message: `${sym}No fresh price${d.symbol && d.symbol !== symbol ? ` for ${d.symbol}` : ''}. The market may be closed or the data feed may be down. Nothing opened. Try again when the market is open.`, refresh: false, actions: [] };
     case 'no_slots':
-      return { code, tone: 'warn', title: 'No free position slots', message: `${sym}all position slots are in use. Close a position first, then approve again.`, refresh: false, actions: [{ id: 'jump', label: 'Go to positions', target: 'pos-open' }] };
+      return { code, tone: 'warn', title: 'No free position slots', message: `${sym}All position slots are full. Close a position, then approve again.`, refresh: false, actions: [{ id: 'jump', label: 'Go to positions', target: 'pos-open' }] };
     case 'worker_not_running':
-      return { code, tone: 'warn', title: 'Worker is stopped', message: `${sym}the worker is stopped, so approvals are paused. Press START (in the header menu), then approve again.`, refresh: false, actions: [{ id: 'start', label: 'START worker' }] };
+      return { code, tone: 'warn', title: 'Worker stopped', message: `${sym}Approvals need a running worker. Press START in the header menu, then approve again.`, refresh: false, actions: [{ id: 'start', label: 'START worker' }] };
     case 'already_decided':
-      return { code, tone: 'info', title: 'Already decided', message: `${sym}this proposal was already ${d.status || 'decided'} (maybe on another device). Refreshing the list.`, refresh: true, actions: [] };
+      return { code, tone: 'info', title: 'Already decided', message: `${sym}This proposal is already ${d.status || 'decided'} (maybe on another device). The app is refreshing the list.`, refresh: true, actions: [] };
     case 'not_found':
-      return { code, tone: 'info', title: 'Proposal not found', message: `${sym}this proposal no longer exists. Refreshing the list.`, refresh: true, actions: [] };
+      return { code, tone: 'info', title: 'Proposal not found', message: `${sym}This proposal no longer exists. The app is refreshing the list.`, refresh: true, actions: [] };
     case 'network':
-      return { code, tone: 'error', title: 'Can’t reach the server', message: 'Can’t reach the server. Nothing was changed; check your connection and try again.', refresh: false, actions: [] };
+      return { code, tone: 'error', title: 'Cannot reach the server', message: 'Cannot reach the server. Nothing changed. Check your connection and try again.', refresh: false, actions: [] };
     default:
-      return { code, tone: 'error', title: 'Couldn’t complete that', message: `${sym}${err?.message || 'unexpected error'}`, refresh: true, actions: [] };
+      return { code, tone: 'error', title: 'Could not finish that', message: `${sym}${err?.message || 'unexpected error'}`, refresh: true, actions: [] };
   }
 }
 
@@ -129,9 +129,9 @@ export function approveAllOutcome(res) {
   });
   let headline;
   if (!ok.length && !bad.length) headline = 'Nothing to approve';
-  else if (!bad.length) headline = `Approved ${ok.length}: ${ok.length === 1 ? 'the position is' : 'the positions are'} now open`;
+  else if (!bad.length) headline = `Approved ${ok.length}: ${ok.length === 1 ? '1 position is' : `${ok.length} positions are`} now open`;
   else if (!ok.length) headline = `None of the ${bad.length} proposals could be approved`;
-  else headline = `Approved ${ok.length}, ${bad.length} could not be approved`;
+  else headline = `Approved ${ok.length}. ${bad.length} could not open.`;
   return { approvedN: ok.length, failedN: bad.length, headline, failures, tone: bad.length ? (ok.length ? 'warn' : 'error') : 'success' };
 }
 
@@ -231,8 +231,8 @@ export function shadowView(p) {
   const taken = p.status === 'approved';
   const sh = p.shadow;
   if (p.status === 'pending') return { tone: 'none', icon: '', label: '', amount: null, amountText: '', detail: '' };
-  if (!sh) return { tone: 'pending', icon: '…', label: 'Not scored yet', amount: null, amountText: '', detail: `Scored once the ${p.horizonHours || 24}h horizon has passed.` };
-  if (sh.unscorable) return { tone: 'neutral', icon: '–', label: 'Can’t be scored', amount: null, amountText: '', detail: 'No price data was available for that window.' };
+  if (!sh) return { tone: 'pending', icon: '…', label: 'Not scored yet', amount: null, amountText: '', detail: `Scored after the ${p.horizonHours || 24}h horizon ends.` };
+  if (sh.unscorable) return { tone: 'neutral', icon: '–', label: 'Can’t be scored', amount: null, amountText: '', detail: 'No price data for that period.' };
   const pnl = num(sh.hypotheticalPnl);
   if (pnl == null) return { tone: 'neutral', icon: '–', label: 'Can’t be scored', amount: null, amountText: '', detail: '' };
   const spy = num(sh.spyPnl);
@@ -367,7 +367,7 @@ export function baselineVerdicts(base) {
     const n = Number(b?.n) || 0;
     const beats = base.beats?.[id];
     if (beats == null || aiN < MIN_BASELINE_N || n < MIN_BASELINE_N) {
-      return { id, label, tone: 'neutral', text: `Not enough data yet (AI ${aiN}, ${nice} ${n}; need ${MIN_BASELINE_N}+ each)` };
+      return { id, label, tone: 'neutral', text: `Not enough data (AI ${aiN}, ${nice} ${n}). Each side needs ${MIN_BASELINE_N}+.` };
     }
     return beats ? { id, label, tone: 'good', text: `AI is ahead of ${nice}` } : { id, label, tone: 'bad', text: `AI is behind ${nice}` };
   };

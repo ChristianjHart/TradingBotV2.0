@@ -38,7 +38,7 @@ export function announceBadges() {
 }
 
 function dots(calls) {
-  if (!calls?.length) return '<p class="dim gm-note">Your approve and reject decisions are judged once their result is known: approving a winner or rejecting a loser is a good call.</p>';
+  if (!calls?.length) return '<p class="dim gm-note">A good call is approving a winner or rejecting a loser. The app judges each decision after the trade or what-if ends.</p>';
   return `<ul class="gm-dots" aria-label="Your last ${calls.length} judged decisions, oldest first">${calls
     .map((c) => `<li class="gm-dot ${c.good ? 'gm-good' : 'gm-bad'}" title="${esc(`${c.kind === 'approved' ? 'Approved' : 'Rejected'} ${c.symbol}: ${c.good ? 'good call' : 'bad call'}`)}"><span aria-hidden="true">${c.good ? '✓' : '✗'}</span><span class="sr-only">${esc(`${c.kind} ${c.symbol}, ${c.good ? 'good call' : 'bad call'}`)}</span></li>`)
     .join('')}</ul>`;
@@ -47,7 +47,7 @@ function dots(calls) {
 export function gamifyHtml() {
   if (!state.loaded) return skeleton(3);
   const g = state.gamify;
-  if (!g) return empty('Achievements are not available from the server yet.');
+  if (!g) return empty('No achievement data yet.');
   const w = g.streaks.win;
   const c = g.streaks.calls;
   const next = nextBadge(g.badges);

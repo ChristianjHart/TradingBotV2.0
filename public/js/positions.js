@@ -119,7 +119,7 @@ export function patchOpenTable() {
   if (!state.loaded) return setHtml(wrap, skeleton(4));
   if (!open.length) {
     wrap.__table = null;
-    return setHtml(wrap, empty('No open positions — the trader bot opens up to 10 after each run'));
+    return setHtml(wrap, empty('No open positions. Approved proposals open here, up to 10.'));
   }
   if (!wrap.__table || !wrap.contains(wrap.__table)) {
     wrap.__h = null;
@@ -334,7 +334,7 @@ async function closeWithStaleGuard(path, symbol) {
         danger: true,
       });
       if (!force) {
-        toast(`Close cancelled — stale quote for ${symbol || 'position'}.`, 'warn');
+        toast(`Close cancelled. The quote for ${symbol || 'the position'} is stale.`, 'warn');
         return null;
       }
       return api(`${path}${path.includes('?') ? '&' : '?'}force=1`, { method: 'POST', body: '{}' });
@@ -362,7 +362,7 @@ export async function closePosition(id) {
 export async function closeAll() {
   const n = state.positions?.open?.length || 0;
   if (!n) return;
-  const ok = await confirmDialog({ title: `Close all ${n} positions?`, message: 'Every open simulated position will be closed at its current price.', confirmText: 'Close all', danger: true });
+  const ok = await confirmDialog({ title: `Close all ${n} positions?`, message: 'The app closes every open simulated position at its current price.', confirmText: 'Close all', danger: true });
   if (!ok) return;
   try {
     let closed;

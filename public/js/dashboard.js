@@ -5,7 +5,7 @@ import { applyPosTab, patchPositions, posChange, posClick, posKey, tfButtonsHtml
 import { patchBudgetWidget } from './budget.js';
 import { bindProposals, patchProposals, proposalsShellHtml, setRerun } from './proposals.js';
 import { onRunClick, patchRunBar, startRun } from './run.js';
-import { bindSections, applySections, patchSectionSummaries, sectionHeadHtml } from './sections.js';
+import { bindSections, applySections, foldAll, patchSectionSummaries, sectionHeadHtml } from './sections.js';
 import { budgetView } from './ai-logic.js';
 import { currentBudget } from './budget.js';
 import { bindNews, newsSectionSummary, patchNews } from './news.js';
@@ -24,25 +24,22 @@ export function summaryHtml() {
   const sm = state.summary;
   const picksN = state.picks?.picks?.length || 0;
   if (!state.loaded) return skeleton(3);
-  if (!sm || !sm.at) return empty('Press RUN: the AI scanner ranks the top picks, then the AI trader proposes trades for you to approve.');
-  const props = sm.proposals || [];
-  const made = sm.proposalCount ?? props.length;
+  if (!sm || !sm.at) return empty('Press RUN. The AI picks symbols, then proposes trades for you to approve.');
+  const made = sm.proposalCount ?? (sm.proposals || []).length;
   const pending = state.status?.proposalsPending ?? state.proposals?.counts?.pending ?? 0;
   const topN = sm.picks || picksN;
-  const head = made ? `AI proposed ${made} trade${made === 1 ? '' : 's'} from a top ${topN}` : `AI proposed no trades from a top ${topN}`;
+  const head = made ? `${made} trade${made === 1 ? '' : 's'} proposed from the top ${topN}` : `No trades proposed from the top ${topN}`;
   const auto = Number(sm.autoApproved) || 0;
   const status = made
-    ? `${pending ? `<a class="prop-link" href="#dashboard" data-jump="sec-proposals">${pending} pending your approval</a>` : 'none pending: all decided'}${auto ? `, ${auto} auto-approved within your caps` : ''}`
-    : 'nothing to approve';
+    ? `${pending ? `<a class="prop-link" href="#dashboard" data-jump="sec-proposals">${pending} waiting for you</a>` : 'All decided'}${auto ? `, ${auto} auto-approved` : ''}`
+    : 'Nothing to approve';
   const who = sm.traderSource === 'demo' || sm.demo ? '<span class="badge-demo">DEMO DATA</span> ' : '';
   return `
     <div class="sum-head">${esc(head)}</div>
     <div class="sum-status">${who}${status}</div>
     <div class="dim sum-when">${esc(new Date(sm.at).toLocaleString())} · scanner ${esc(sm.scannerModel || sm.scannerSource)} · trader ${esc(sm.traderModel || sm.traderSource)}</div>
-    ${sm.note ? `<p class="sum-note">${esc(sm.note)}</p>` : ''}
+    ${sm.note ? `<p class="sum-note clamp">${esc(sm.note)}</p>` : ''}
     ${newsLineSummary(sm.news)}
-    ${props.length ? `<ul class="sum-list">${props.map((t) => `<li><span class="sym">${esc(t.symbol)}</span> <span class="pill pill-${esc(t.side)}">${esc(t.side)}</span>
-        <span class="mono dim">${fmtMoney(t.allocationUsd ?? t.allocation, 0)}</span> <span class="sum-r clamp">— ${esc(t.reason)}</span></li>`).join('')}</ul>` : ''}
     ${(sm.rejected || []).length ? `<div class="dim sum-rej">Passed on: ${sm.rejected.map(esc).join(', ')}</div>` : ''}`;
 }
 
@@ -84,13 +81,11 @@ export function accuracyHtml() {
   return `
     <div class="big-num">${wr == null ? '—' : `${wr.toFixed(0)}%`}</div>
     <div class="sub-num">${closed ? `${wins} wins / ${closed} closed trades` : 'no closed trades yet'}</div>
-    ${closed && small ? `<div class="warn-note">Small sample (${closed} trade${closed === 1 ? '' : 's'}) — not statistically meaningful yet.</div>` : ''}
+    ${closed && small ? `<div class="warn-note">Only ${closed} trade${closed === 1 ? '' : 's'}. Too few to trust.</div>` : ''}
     <div class="perf-grid">
       <div class="perf-stat"><span class="lbl">EQUITY</span><strong>${fmtMoney(acct?.equity, 0)}</strong></div>
       <div class="perf-stat"><span class="lbl">REALIZED P&amp;L</span><strong class="${clsPos(acct?.realizedPnl)}">${fmtMoney(acct?.realizedPnl, 0)}</strong></div>
       <div class="perf-stat"><span class="lbl">OPEN P&amp;L</span><strong class="${clsPos(acct?.unrealizedPnl)}">${fmtMoney(acct?.unrealizedPnl, 0)}</strong></div>
-      <div class="perf-stat"><span class="lbl">OPEN</span><strong>${acct?.openCount ?? 0}</strong></div>
-      <div class="perf-stat"><span class="lbl">AVG R</span><strong>${p?.avgR != null ? `${Number(p.avgR).toFixed(2)}R` : '—'}</strong></div>
       <div class="perf-stat"><span class="lbl">PICK ACCURACY</span><strong>${pa && pa.total ? `${((pa.hits / pa.total) * 100).toFixed(0)}% (${pa.hits}/${pa.total})` : '—'}</strong></div>
     </div>`;
 }
@@ -98,12 +93,12 @@ export function accuracyHtml() {
 export function bannersHtml() {
   const s = state.status || {};
   const out = [];
-  if (state.loadError) out.push(`<div class="notice" role="alert">Can’t reach the server (${esc(state.loadError)}). Showing the last data received${state.lastUpdate ? ` at ${esc(fmtTime(state.lastUpdate))}` : ''}; retrying automatically.</div>`);
-  if (s.mockData) out.push('<div class="banner-mock">Running on <strong>mock</strong> market data — <a href="#settings/account">Add your Alpaca keys under Settings → Account</a> for live scans. Prices and results are synthetic.</div>');
-  else if (s.fallbacks?.count) out.push(`<div class="banner-mock">Live data failed for ${s.fallbacks.count} symbol(s) — showing MOCK prices for: ${(s.fallbacks.symbols || []).map((f) => `<code title="${esc(f.error)}">${esc(f.symbol)}</code>`).join(' ')}</div>`);
-  if (s.marketOpen === false) out.push('<div class="banner-mock">US stock market is closed — stock prices are the last close and stock stops are not evaluated. Crypto trades 24/7.</div>');
+  if (state.loadError) out.push(`<div class="notice" role="alert">Cannot reach the server (${esc(state.loadError)}).${state.lastUpdate ? ` Data is from ${esc(fmtTime(state.lastUpdate))}.` : ''} Retrying.</div>`);
+  if (s.mockData) out.push('<div class="banner-mock"><strong>Mock market data.</strong> Prices are synthetic. <a href="#settings/account">Add Alpaca keys</a> for live data.</div>');
+  else if (s.fallbacks?.count) out.push(`<div class="banner-mock">Live data failed for ${s.fallbacks.count} symbol${s.fallbacks.count === 1 ? '' : 's'}. The app skips them: ${(s.fallbacks.symbols || []).map((f) => `<code title="${esc(f.error)}">${esc(f.symbol)}</code>`).join(' ')}</div>`);
+  if (s.marketOpen === false) out.push('<div class="banner-mock">US stock market is closed. Stock prices show the last close and stock stops do not run. Crypto trades 24/7.</div>');
   if ((s.staleSymbols || []).length) out.push(`<div class="banner-mock">Stale quotes: ${s.staleSymbols.map((x) => `<code>${esc(x)}</code>`).join(' ')}</div>`);
-  if (s.ai?.demo) out.push('<div class="banner-mock"><span class="badge-demo">DEMO DATA</span> The AI is the built-in test fixture: proposals are canned, not a real analysis. Add your OpenRouter key under Settings → Account for the real AI.</div>');
+  if (s.ai?.demo) out.push('<div class="banner-mock"><span class="badge-demo">DEMO DATA</span> The AI is a test fixture. It gives canned proposals. <a href="#settings/account">Add an OpenRouter key</a> for the real AI.</div>');
   return out.join('');
 }
 
@@ -117,14 +112,14 @@ export function sysStripHtml() {
 /** Label for the picks source. There is no rule-based fallback: picks are from the AI (or the demo fixture). */
 export function picksBadge(st) {
   if (!st?.picks?.length) return { text: '', title: '' };
-  if (st.source === 'demo') return { text: 'DEMO DATA · test AI', title: 'Produced by the built-in test AI (not a real analysis)' };
-  return { text: `AI${st.model ? ` · ${st.model}` : ''}`, title: 'Ranked by the AI scanner' };
+  if (st.source === 'demo') return { text: 'DEMO DATA · test AI', title: 'From the test AI. Not a real analysis.' };
+  return { text: `AI${st.model ? ` · ${st.model}` : ''}`, title: 'Ranked by the AI.' };
 }
 
 export function picksHtml() {
   if (!state.loaded) return skeleton(5);
   const picks = state.picks?.picks || [];
-  if (!picks.length) return empty('Press RUN: the AI scanner will rank the top symbols');
+  if (!picks.length) return empty('Press RUN to rank the top symbols.');
   return `<div class="scroll-y" tabindex="0" role="region" aria-label="Scanner picks table"><table class="table cards t-picks${state.picksAll ? ' show-all' : ''}">
     <thead><tr><th scope="col">#</th><th scope="col">SYMBOL</th><th scope="col">DIR</th><th scope="col">CONF</th><th scope="col">REASON</th></tr></thead>
     <tbody>${picks.map((p, i) => `<tr>
@@ -140,14 +135,14 @@ export function mountDashboard() {
     <div id="banners"></div>
     <div class="page-toolbar">
       <span class="dim" id="upd" aria-live="off"></span>
-      <div class="toolbar-actions"><button class="btn-accent" id="btn-scan" type="button">RUN</button></div>
+      <div class="toolbar-actions"><button class="btn-ghost" id="btn-fold" type="button">Collapse all</button><button class="btn-accent" id="btn-scan" type="button">RUN</button></div>
     </div>
     <div id="run-gate"></div>
     <div id="run-bar" role="status" aria-live="polite"></div>
     ${proposalsShellHtml()}
     <div class="grid grid-news">
     <section class="widget news-card" aria-labelledby="h-news" id="dsec-news" data-dsec="news">${sectionHeadHtml('news')}<h2 class="widget-title" id="h-news"><span>NEWS &amp; EARNINGS</span><span class="dim" id="news-sub"></span></h2><div id="w-news"></div></section>
-    <section class="widget sched-widget" aria-labelledby="h-sched-w" id="dsec-sched" data-dsec="sched">${sectionHeadHtml('sched')}<h2 class="widget-title" id="h-sched-w"><span>SCHEDULE</span><a class="dim" href="#settings/schedule">Manage →</a></h2><div id="w-sched"></div></section>
+    <section class="widget sched-widget" aria-labelledby="h-sched-w" id="dsec-sched" data-dsec="sched">${sectionHeadHtml('sched', { href: '#settings/schedule', label: 'Manage' })}<h2 class="widget-title" id="h-sched-w"><span>SCHEDULE</span></h2><div id="w-sched"></div></section>
     </div>
     <div class="grid grid-fun">
     <section class="widget gm-card" aria-labelledby="h-gm" id="dsec-fun" data-dsec="fun">${sectionHeadHtml('fun')}<h2 class="widget-title" id="h-gm"><span>ACHIEVEMENTS</span><span class="dim">streaks &amp; badges</span></h2><div id="w-gamify"></div></section>
@@ -188,11 +183,12 @@ export function mountDashboard() {
         </div>
       </section>
     </div>
-    <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf')}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span><a class="dim" href="#performance">Details &amp; run history →</a></h2>${perfShellHtml()}</section>
+    <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf', { href: '#performance', label: 'Details' })}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span></h2>${perfShellHtml({ compact: true })}</section>
   </div>`;
   bindSections(root);
   applySections(root);
   $('btn-scan').addEventListener('click', startRun);
+  $('btn-fold').addEventListener('click', foldAll);
   $('run-bar').addEventListener('click', onRunClick);
   $('run-gate').addEventListener('click', onRunClick);
   setRerun(startRun);

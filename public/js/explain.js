@@ -52,6 +52,7 @@ function panelHtml(p) {
   if (v.scannerReason) rows.push(`<div><span class="lbl">SCANNER SAID</span><p>${esc(v.scannerReason)}</p></div>`);
   if (v.traderReason) rows.push(`<div><span class="lbl">TRADER SAID ${personaBadge(p)}</span><p>${esc(v.traderReason)}</p></div>`);
   const ctx = [];
+  if (p.models?.trader) ctx.push(`${p.source === 'demo' ? 'Demo AI' : 'AI'} ${p.models.trader}`);
   if (v.confidencePct != null) ctx.push(`Scanner confidence ${v.confidencePct}%`);
   if (v.rr != null) ctx.push(`reward-to-risk ${v.rr.toFixed(1)} to 1`);
   if (v.stopPct != null) ctx.push(`stop ${v.stopPct.toFixed(1)}% away`);
@@ -62,6 +63,7 @@ function panelHtml(p) {
     ${rows.join('')}
     ${sig ? `<div><span class="lbl">THE SETUP, READ FOR A ${esc(v.side.toUpperCase())}</span><ul class="why-sigs">${sig}</ul></div>` : ''}
     ${v.regime ? `<div><span class="lbl">MARKET BACKDROP</span><p>${esc(v.regime)}</p></div>` : ''}
+    ${v.sentiment?.note ? `<div><span class="lbl">NEWS</span><p>${esc(v.sentiment.note)}</p></div>` : ''}
     ${v.caution.length ? `<div class="why-caution"><span class="lbl">WATCH OUT FOR</span><ul>${v.caution.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
     ${debateHtml(p)}
   </div>`;

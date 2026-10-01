@@ -53,11 +53,11 @@ export function runBarHtml() {
   const n = pend === 0 ? 0 : Number(r.proposals) || 0;
   const tail =
     v.kind === 'error'
-      ? '<span class="neg">Run failed. Nothing was proposed.</span>'
+      ? '<span class="neg">The run failed. It proposed nothing.</span>'
       : v.kind === 'done'
         ? `<span class="pos">${esc(runDoneText(r, pend))}</span>${n ? ` <a class="linklike" href="#dashboard" data-jump="sec-proposals">Review ${n === 1 ? 'it' : 'them'}</a>` : ''}`
         : state.runLocal === false
-          ? '<span class="run-elsewhere">A run is already in progress (started elsewhere or before this page loaded). RUN is disabled until it finishes.</span>'
+          ? '<span class="run-elsewhere">A run is already going. It started elsewhere or before this page loaded. RUN stays off until it ends.</span>'
           : '<span class="dim">Running…</span>';
   return `<div class="run-bar run-${v.kind}" role="group" aria-label="Run progress"><ol class="stepper">${steps}</ol>
     <div class="run-meta">${triggerHtml(r)}${tail} <span class="mono dim" id="run-elapsed"></span></div>${newsLineHtml(r)}</div>${pr ? problemHtml(pr) : ''}`;
@@ -96,7 +96,7 @@ export function patchRunBar() {
     if (gate) b.setAttribute('aria-describedby', 'run-gate');
     else b.removeAttribute('aria-describedby');
     setText(b, isRunning() ? (state.runLocal === false ? 'RUN IN PROGRESS…' : 'RUNNING…') : 'RUN');
-    if (isRunning()) b.title = 'A run is already in progress. It can’t be cancelled, please wait for it to finish.';
+    if (isRunning()) b.title = 'A run is in progress. You cannot cancel it. Wait for it to end.';
     else if (gate) b.title = gate.reason;
     else b.removeAttribute('title');
   }
@@ -113,16 +113,16 @@ export async function startRun() {
   try {
     const res = await api('/run', { method: 'POST', body: '{}' });
     state.runLocal = res.started !== false;
-    if (!state.runLocal) toast('A run is already in progress — following it.', 'info');
+    if (!state.runLocal) toast('A run is already going. This page follows it.', 'info');
     state.run = { ...(state.run || {}), ...res, running: true, stage: res.stage || 'fetching', startedAt: res.startedAt || new Date().toISOString() };
     patchRunBar();
     trackRun();
   } catch (e) {
-    if (e.code === 'worker_not_running' || (e.status === 409 && !e.code)) toast('The worker is stopped, so the AI can’t run. Press START in the header menu, then RUN again.', 'error', 9000);
+    if (e.code === 'worker_not_running' || (e.status === 409 && !e.code)) toast('The worker is stopped, so the AI cannot run. Press START in the header menu, then press RUN.', 'error', 9000);
     else if (e.code && runProblem({ stage: 'blocked', code: e.code, error: e.message }) && e.code !== 'run_failed') {
       state.run = { ...(state.run || {}), running: false, stage: 'blocked', code: e.code, error: e.message, runId: `local-${Date.now()}` };
       patchRunBar();
-    } else toast(`Could not start run: ${e.message}`, 'error');
+    } else toast(`Could not start the run: ${e.message}`, 'error');
   }
 }
 

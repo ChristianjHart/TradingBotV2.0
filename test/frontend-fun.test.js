@@ -50,7 +50,7 @@ test('explainView: tally headline, reward-to-risk, caution list (earnings, flags
   assert.equal(shortWithBearishNews.sentiment.stance, 'for');
   const legacy = explainView(prop({ setup: null, regime: undefined }));
   assert.equal(legacy.hasSetup, false);
-  assert.match(legacy.headline, /predates the feature/);
+  assert.match(legacy.headline, /older than this feature/);
 });
 
 test('macroSoon and dayDiff', () => {

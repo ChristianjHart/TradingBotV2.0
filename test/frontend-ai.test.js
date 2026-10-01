@@ -36,9 +36,9 @@ test('aiBlocked explains why RUN is disabled', () => {
 });
 
 test('runDoneText never implies trades opened by themselves', () => {
-  assert.match(runDoneText({ picks: 20, proposals: 2 }), /2 proposals are waiting for your approval/);
-  assert.match(runDoneText({ picks: 20, proposals: 1 }), /1 proposal is waiting/);
-  assert.match(runDoneText({ picks: 20, proposals: 0 }), /proposed no trades/);
+  assert.match(runDoneText({ picks: 20, proposals: 2 }), /2 proposals waiting for you/);
+  assert.match(runDoneText({ picks: 20, proposals: 1 }), /1 proposal waiting/);
+  assert.match(runDoneText({ picks: 20, proposals: 0 }), /No trades proposed/);
   assert.doesNotMatch(runDoneText({ picks: 5, proposals: 1, opened: 3 }), /opened/);
 });
 
@@ -55,9 +55,9 @@ test('approveProblem maps each 409 code to a clear message with the fix', () => 
   assert.ok(pm.actions.some((a) => a.id === 'rerun'));
   assert.ok(approveProblem({ code: 'expired' }).refresh);
   assert.match(approveProblem({ code: 'risk_blocked', details: { reason: 'class cap 60% exceeded' } }).message, /class cap 60% exceeded/);
-  assert.match(approveProblem({ code: 'stale_quote', details: { symbol: 'AAPL' } }).message, /market is probably closed/);
+  assert.match(approveProblem({ code: 'stale_quote', details: { symbol: 'AAPL' } }).message, /market may be closed/);
   const ns = approveProblem({ code: 'no_slots' });
-  assert.match(ns.message, /Close a position first/);
+  assert.match(ns.message, /Close a position, then approve/);
   assert.equal(ns.actions[0].target, 'pos-open');
   const w = approveProblem({ code: 'worker_not_running' });
   assert.match(w.message, /START/);
@@ -75,7 +75,7 @@ test('approveAllOutcome and approveAllPlan', () => {
   const o = approveAllOutcome({ approved: [{ id: 'a', symbol: 'A' }], failed: [{ id: 'b', symbol: 'B', code: 'no_slots', error: 'x' }] });
   assert.equal(o.tone, 'warn');
   assert.equal(o.failures[0].code, 'no_slots');
-  assert.match(o.headline, /Approved 1, 1 could not/);
+  assert.match(o.headline, /Approved 1\. 1 could not/);
   assert.equal(approveAllOutcome({ approved: [], failed: [{ id: 'b', code: 'expired' }] }).tone, 'error');
   assert.equal(approveAllOutcome({ approved: [{}, {}], failed: [] }).tone, 'success');
   const now = Date.now();
@@ -193,5 +193,5 @@ test('net edge formula and baseline verdicts guard small samples', () => {
 });
 
 test('runDoneText reflects proposals already decided', () => {
-  assert.match(runDoneText({ picks: 9, proposals: 2 }, 0), /none are waiting now/);
+  assert.match(runDoneText({ picks: 9, proposals: 2 }, 0), /All decided/);
 });

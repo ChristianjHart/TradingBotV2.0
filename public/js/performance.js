@@ -8,7 +8,17 @@ import { $, charts, empty, pctOf, root, setHtml, skeleton, state } from './state
 
 /* ---------- performance ---------- */
 
-export function perfShellHtml() {
+export function perfShellHtml({ compact = false } = {}) {
+  // Compact (dashboard): headline numbers and the equity chart. The Performance page has the rest.
+  if (compact) {
+    return `<div class="perf-layout perf-compact"><div class="perf-main">
+      <div id="perf-stats" class="perf-cards"></div>
+      <div class="perf-chart-title">EQUITY CURVE</div>
+      <div class="chart-area perf-chart"><canvas id="equity-chart"></canvas></div>
+      <p class="sr-only" id="equity-sum"></p>
+      <div class="sr-only" id="equity-table"></div>
+    </div></div>`;
+  }
   return `<div class="perf-layout">
     <div class="perf-main">
       <div id="perf-stats" class="perf-cards"></div>
@@ -33,8 +43,8 @@ export function perfShellHtml() {
 
 /** 'No closed trades yet' / 'Only 1 closed trade' / 'Only 7 closed trades' (singular/plural handled). */
 export function closedNote(n) {
-  const tail = 'treat these numbers as anecdotal until there are 20+.';
-  return n === 0 ? `No closed trades yet — ${tail}` : `Only ${n} closed trade${n === 1 ? '' : 's'} — ${tail}`;
+  const tail = 'Treat these numbers as weak until you have 20 or more.';
+  return n === 0 ? `No closed trades yet. ${tail}` : `Only ${n} closed trade${n === 1 ? '' : 's'}. ${tail}`;
 }
 
 export function statCard(label, value, cls = '', sub = '') {
@@ -50,7 +60,7 @@ export function patchPerf() {
     return;
   }
   if (!p) {
-    setHtml(stats, '<div class="empty">Performance data isn’t available yet (the server has no /api/performance data, or there are no closed trades).</div>');
+    setHtml(stats, '<div class="empty">No performance data yet.</div>');
     charts.equity?.set([]);
     setHtml($('perf-calib'), '');
     setHtml($('perf-bots'), '');
@@ -153,7 +163,7 @@ export function baselinesHtml(p) {
   const win = bl.window?.from ? `Window: ${esc(fmtDateTime(bl.window.from))} to ${esc(fmtDateTime(bl.window.to))}` : 'No comparison window yet';
   return `<table class="table base"><thead><tr><th scope="col">STRATEGY</th><th scope="col">P&amp;L</th><th scope="col">RETURN</th><th scope="col">N</th></tr></thead><tbody>${row('AI proposals', bl.ai, 'is-ai')}${row('SPY buy &amp; hold', bl.spyHold)}${row('Random picks', bl.randomPicks)}</tbody></table>
     <ul class="vchips">${chips}</ul>
-    <p class="dim base-note">${win}. Same allocation and costs for each. Verdicts need at least ${MIN_BASELINE_N} scored trades on both sides; below that the result is mostly luck.</p>`;
+    <p class="dim base-note">${win}. Each strategy uses the same size and costs. A verdict needs ${MIN_BASELINE_N} or more scored trades on each side. With fewer, the result is mostly luck.</p>`;
 }
 
 /* performance page */

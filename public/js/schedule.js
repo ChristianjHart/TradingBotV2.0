@@ -21,7 +21,7 @@ export function scheduleWidgetHtml() {
   const s = state.schedule;
   if (!s) return empty('The schedule is not available from the server.');
   if (!s.enabled) {
-    return `<p class="sched-off"><strong>Scheduled runs are off.</strong> The AI only runs when you press RUN. Turn the schedule on to have it look at the market at set times (it still only proposes; you approve).</p><a class="btn-ghost sched-link" href="#settings/schedule">Set up a schedule</a>`;
+    return `<p class="sched-off"><strong>Scheduled runs are off.</strong> The AI runs only when you press RUN. Turn on a schedule to run it at set times. It still only proposes. You approve.</p><a class="btn-ghost sched-link" href="#settings/schedule">Set up a schedule</a>`;
   }
   const nx = nextRunView(s.nextRunAt);
   const slots = (s.slotsToday || []).map(slotView);
@@ -252,7 +252,7 @@ function wire() {
         return;
       }
       if (v.value.length) {
-        const ok = await confirmDialog({ title: 'Turn on crypto runs?', message: `Each crypto run costs the same as a stock run, and crypto runs happen every day including weekends (${v.value.length} a day at ${v.value.join(', ')} ET). That adds to your monthly AI spend.`, confirmText: 'Save crypto runs' });
+        const ok = await confirmDialog({ title: 'Turn on crypto runs?', message: `Each crypto run costs the same as a stock run. Crypto runs happen every day, including weekends (${v.value.length} a day at ${v.value.join(', ')} ET). This adds to your monthly AI spend.`, confirmText: 'Save crypto runs' });
         if (!ok) return;
       }
       return run(btn, () => savePatch({ cryptoRuns: v.value }), v.value.length ? 'Crypto runs saved' : 'Crypto runs are off');
@@ -290,7 +290,7 @@ async function toggleSchedule() {
     const fc = forecastRows(S.forecast, S.sched.plan).find((r) => r.selected);
     const ok = await confirmDialog({
       title: 'Turn on scheduled runs?',
-      message: `The AI will run by itself at the times of ${PLAN_INFO[S.sched.plan]?.label || 'your plan'} (${PLAN_INFO[S.sched.plan]?.when || 'custom times'}). Each run uses your OpenRouter key and AI budget${fc ? `; projected ${fc.unknown ? 'cost is unknown until your first runs' : `${fc.costText} (${fc.fits.label})`}` : ''}. It only proposes trades; nothing opens until you approve. Runs are skipped when the budget is too low. You can turn this off any time.`,
+      message: `The AI will run by itself at the times of ${PLAN_INFO[S.sched.plan]?.label || 'your plan'} (${PLAN_INFO[S.sched.plan]?.when || 'custom times'}). Each run uses your OpenRouter key and AI budget.${fc ? ` Projected cost: ${fc.unknown ? 'unknown until your first runs' : `${fc.costText} (${fc.fits.label})`}.` : ''} It only proposes trades. Nothing opens until you approve. A run is skipped when the budget is too low. You can turn this off at any time.`,
       confirmText: 'Turn on schedule',
     });
     if (!ok) return;
@@ -310,7 +310,7 @@ async function testFire(btn) {
   const est = S.forecast?.estCostPerRunUsd;
   const ok = await confirmDialog({
     title: 'Run the AI now as a test?',
-    message: `This starts one real run right now, exactly like a scheduled run (scanner, news and trader). It uses your OpenRouter key and costs about ${est != null && S.forecast?.basis !== 'unknown' ? usdText(est, 3) : 'one run’s worth'} of your monthly budget. It only proposes trades; nothing opens until you approve.`,
+    message: `This starts one real run now, like a scheduled run (scanner, news, trader). It uses your OpenRouter key and costs about ${est != null && S.forecast?.basis !== 'unknown' ? usdText(est, 3) : 'one run’s worth'} of your monthly budget. It only proposes trades. Nothing opens until you approve.`,
     confirmText: 'Test fire now',
   });
   if (!ok) return;

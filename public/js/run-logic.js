@@ -2,9 +2,9 @@
 
 export const STEPS = [
   { id: 'fetching', label: 'Fetch market data', hint: 'downloading bars' },
-  { id: 'scanning', label: 'Scanner bot', hint: 'AI can take 1–3 min' },
+  { id: 'scanning', label: 'Scanner bot', hint: 'takes 1–3 min' },
   { id: 'news', label: 'News & earnings', hint: 'headlines and earnings dates' },
-  { id: 'trading', label: 'Trader bot', hint: 'sizing & simulating trades' },
+  { id: 'trading', label: 'Trader bot', hint: 'sizes and simulates trades' },
 ];
 
 /**
