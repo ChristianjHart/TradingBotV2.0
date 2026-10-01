@@ -2,6 +2,7 @@ import net from 'node:net';
 import { config } from './config.js';
 import { validateSchedule } from './services/scheduler.js';
 import { validateNewsSettings } from './services/newsNotes.js';
+import { isPersonaId } from './services/personas.js';
 
 function expandV6(a) {
   let addr = a;
@@ -105,6 +106,7 @@ export const SETTING_RULES = {
   monthlyAiBudgetUsd: num(0, 1000),
   netEdgeDrawdownWeight: num(0, 10),
   netEdgeAvoidedWeight: num(0, 10),
+  botPersona: isPersonaId, // cosmetic voice of the trader bot (closed whitelist, see services/personas.js)
 };
 
 /** Returns { value } of accepted fields, or { error } naming the first bad/unknown one. */

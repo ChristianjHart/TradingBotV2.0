@@ -61,6 +61,8 @@ const defaults = {
     // netEdge = realizedPnl - drawdownWeight x maxDrawdownUsd + avoidedWeight x avoidedLoss
     netEdgeDrawdownWeight: 0.5,
     netEdgeAvoidedWeight: 1,
+    // Cosmetic voice of the trader bot's text (see services/personas.js). Never changes numbers or rules.
+    botPersona: 'default',
   },
   worker: {
     status: 'online',

@@ -1,16 +1,19 @@
 /* Pure helpers for the collapsible dashboard sections on phones (no DOM, no storage access here). */
 
-/** key -> {title, open by default}. Order is the on-screen order on phones after Proposals. */
+/** key -> {title, open by default}. Order is the on-screen order after Proposals (see the #dsec-* order rules in the CSS). */
 export const SECTIONS = {
   pos: { title: 'Positions', open: true },
   sum: { title: 'AI summary', open: false },
+  picks: { title: 'Top picks', open: false },
   news: { title: 'News & earnings', open: false },
+  cal: { title: 'Calendar', open: false },
+  perf: { title: 'Performance', open: false },
+  acc: { title: 'Accuracy', open: false },
+  fun: { title: 'Achievements', open: false },
+  totw: { title: 'Trade of the week', open: false },
+  alloc: { title: 'Allocation', open: false },
   sched: { title: 'Schedule', open: false },
   budget: { title: 'Budget', open: false },
-  picks: { title: 'Top picks', open: false },
-  perf: { title: 'Performance', open: false },
-  acc: { title: 'Model accuracy', open: false },
-  alloc: { title: 'Allocation', open: false },
 };
 export const SECTION_KEYS = Object.keys(SECTIONS);
 export const SECTIONS_STORE_KEY = 'tb_dash_sections';
@@ -27,6 +30,9 @@ export function parseSectionPrefs(raw) {
     return {};
   }
 }
+
+/** "Collapse all" / "Expand all": open everything only when nothing is open, else close everything. */
+export const foldAllTarget = (openFlags) => !openFlags.some(Boolean);
 
 export const isSectionOpen = (prefs, key) => (typeof prefs?.[key] === 'boolean' ? prefs[key] : SECTIONS[key]?.open ?? false);
 
@@ -55,6 +61,12 @@ export function sectionSummary(key, d = {}) {
     case 'news':
       return d.text || '';
     case 'sched':
+      return d.text || '';
+    case 'fun':
+      return d.text || '';
+    case 'totw':
+      return d.text || '';
+    case 'cal':
       return d.text || '';
     case 'budget':
       return d.spentText && d.capText ? `${d.spentText} of ${d.capText}` : '';

@@ -10,6 +10,7 @@ AI market scanner & prediction dashboard. Same look and feel as the classic trad
 - **Budget governor**: a hard monthly cap (default **$20**, all bots) with real cost tracking per call
 - **Shadow scoring**: every proposal (approved or not) and every scanner pick is scored at its horizon as if it had been traded, so the dashboard can show what your approvals/rejections were worth (avoided loss, missed gain) and whether the AI beats SPY buy-and-hold and seeded random picks
 - **Scores every pick** after its horizon and reports confidence calibration (`/api/performance`)
+- **Fun stuff** (see *Fun features* below): streaks & badges, trade of the week with a share image, bot personalities, a "Why did the AI pick this?" panel with an on-demand bull-vs-bear debate, a what-if replay, a confidence reliability diagram, an earnings & event calendar and a live market-mood bar
 - Persists runs, positions, equity snapshots and picks to Supabase (optional) and restores them on boot
 - Never places real orders. Alpaca is used for market data only
 
@@ -120,10 +121,34 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 | POST | `/api/schedule/test-fire` | Body `{slotId?}`. Runs through the same gate as a scheduled run, marked `trigger.type:'test'`; 202 `{started, trigger, run}`. 409 `code`: `worker_not_running` \| `run_in_progress` \| `no_api_key` \| `budget_exhausted` \| `insufficient_budget`; 400 `unknown_slot` |
 | GET | `/api/schedule/forecast?plan=A\|B\|C\|D\|custom` | Monthly cost forecast per plan (all plans + `current` when `plan` is omitted; 400 `invalid_plan`) |
 | GET | `/api/schedule/experiments` | Per plan and trigger type: runs, avg cost, proposals/run, approval rate, net edge, edge per dollar (null until enough samples) |
-| PATCH | `/api/settings` | Slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight`, `schedule` (partial object, deep-merged; see *Run schedules*) |
+| PATCH | `/api/settings` | `botPersona` (see *Fun features*), slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight`, `schedule` (partial object, deep-merged; see *Run schedules*) |
+| GET | `/api/gamify` | `{streaks:{win:{current,best,closed}, calls:{current,best,judged}}, stats, badges:[{id,emoji,name,desc,group,earned,progress:{value,target}}], earnedCount, total, recentCalls}`. Derived from stored trades and proposals; nothing is persisted |
+| GET | `/api/trade-of-the-week` | `{trade, window, candidates}`: best profitable closed trade of the last 7 days with a templated `caption` (`trade` is `null` when there is none) |
+| POST | `/api/proposals/:id/debate` | One AI call returning the case FOR and AGAINST that proposal plus a lean; saved on the proposal, so repeats are free (`?force=1` re-runs and re-spends). Budget-governed (billed under bot `other`), no fallback. Errors: 404, 409 `no_api_key`, 402 `budget_exhausted`, 429 `rate_limited`, 502 `invalid_output`\|`model_unavailable`\|`upstream_error`, 504 `timeout` |
+| POST | `/api/whatif` | Body (all optional) `{stopMult, targetMult (0.25-4), sizeMult (0.1-3), horizonHours (1-168), breakEven, trailR (0-10), scope: all\|approved\|declined}` → baseline vs scenario P&L, win rate, drawdown, both cumulative curves, biggest movers and honest `skipped` counts |
+| GET | `/api/calendar?days=21` | Earnings (Finnhub; what you hold, what is proposed, the scanner's top picks), FOMC decisions, the jobs report and NYSE closures, grouped by ET day (max 28 days). `earningsAvailable:false` when there is no Finnhub key |
+| GET | `/api/mood` | Homemade 0-100 fear/greed-style index with its components, plus SPY/QQQ/IWM/BTC quotes |
 | GET | `/api/health` | Public |
 
 `/api/dashboard` remains as a slim summary (accuracy, worker, logs). The legacy `/watchlist`, `/predictions`, `/accuracy`, `/model`, `/scan`, `/train`, `/evaluate` endpoints were removed.
+
+## Dashboard layout
+
+Proposals stay open at the top. Every other block is a one-line section with a summary (for example "net edge +$1,528"). **Positions** is the only section open by default. Use the arrow on a section, or **Collapse all / Expand all**, to change this. The choice is saved in your browser. In the calendar, each day also folds. News shows 4 notes first, the dashboard performance block shows headline numbers and the equity chart (full tables live on the Performance page), and each proposal card folds its risk numbers behind one line. Copy rules are in [`docs/COPY-STYLE.md`](docs/COPY-STYLE.md).
+
+## Fun features
+
+All of these are read-only helpers: none of them can open a position or loosen a risk rule.
+
+- **Streaks & badges** (`/api/gamify`, dashboard *Achievements*). A *win streak* is consecutive profitable closed trades. A *good call* is approving a trade that made money or rejecting one that would have lost; only decisions you made count (not expiries, news-guard blocks or auto-approvals), and an approved trade is judged on its real closed position when there is one. 13 badges are derived from that data, so there is no new storage. A toast announces a newly earned badge (never on your first visit, which only records what you already have).
+- **Trade of the week**. Best profitable closed trade of the last 7 days. *Share image* draws a 1200x630 card on a canvas in your browser (native share sheet where available, otherwise a download); nothing is uploaded.
+- **Bot personalities** (Settings → *Bot personality*, `botPersona`: `default`, `professor`, `hype`, `veteran`, `zen`, `pirate`). Changes only the wording of the trader's one-sentence reasons and run summary (and of debates). The persona id is a closed whitelist, the instruction states that numbers, levels and risk rules are unaffected, and every level is still validated and clamped server-side. The persona is saved on each proposal.
+- **Why did the AI pick this?** On every proposal card (pending and history). Shows the scanner's and trader's reasoning, the market backdrop and the technical setup read *relative to the trade's side* (falling prices support a short), news sentiment, and a "watch out for" list (earnings soon, risk flags, upcoming macro days, low reward-to-risk). New proposals store a compact numeric snapshot (`setup`, `regime`, `scannerReason`, `persona`); older ones show what they have.
+- **Bull vs bear debate**. On demand from that panel. One AI call (not two) returns both cases and a lean. It only receives structured numbers and flags, never raw news text. Cached on the proposal, billed against the monthly budget, and with no key or budget it says so instead of inventing anything.
+- **What-if replay** (Performance page). Re-simulates decided proposals through the same exit simulator the app already uses (stop, target, break-even, trailing stop, time exit, slippage, fees) with different rules, next to the real rules. Both lines are re-simulated, so they are comparable. Proposals still inside their horizon, or whose hourly price history is no longer available, are skipped and counted. Hourly bars hide intra-hour moves.
+- **Confidence reliability diagram** (Performance, dashboard). Stated confidence vs actual hit rate with 95% Wilson ranges, a Brier score against the base-rate guess, and a verdict that stays "anecdotal" below 30 scored picks.
+- **Earnings & event calendar**. Earnings come from the same Finnhub client and cache as the news stage. **The macro list is built in** (FOMC decision days for 2026 in `server/services/calendar.js`, the jobs report as "usually the first Friday", NYSE closures from the existing holiday table): verify dates before relying on them and extend the list each year. CPI is not included.
+- **Market mood bar**. A slim bar under the top nav on every page: a homemade index (SPY trend and momentum, breadth, new highs vs lows, volatility regime, Bitcoin momentum) computed from market data the app already fetches, plus index quotes. It is not CNN's Fear & Greed and says so.
 
 ## Tests & maintenance
 

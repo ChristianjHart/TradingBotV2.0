@@ -40,7 +40,7 @@ export function updateAuthUI() {
 
 onUnauthorized(async () => {
   const had = !!getToken();
-  const t = await tokenDialog(had ? 'The saved admin token was rejected. Enter the correct token.' : 'This action requires the admin token configured on the server (ADMIN_TOKEN).');
+  const t = await tokenDialog(had ? 'The server rejected the saved admin token. Enter the correct token.' : 'This action requires the admin token configured on the server (ADMIN_TOKEN).');
   if (t) {
     state.auth.required = true;
     setTimeout(updateAuthUI, 0);
@@ -68,7 +68,7 @@ export async function authClick() {
   }
   if (getToken()) {
     setToken('');
-    toast('Signed out — the admin token was removed from this browser', 'info');
+    toast('Signed out. The app removed the admin token from this browser.', 'info');
   } else {
     const t = await tokenDialog();
     if (t) {
@@ -102,10 +102,10 @@ export function bindChrome() {
     }
   });
   $('btn-kill').addEventListener('click', async () => {
-    if (!(await confirmDialog({ title: 'Kill the worker?', message: 'This halts all scan and monitoring cycles until the worker is restarted.', confirmText: 'Kill worker', danger: true }))) return;
+    if (!(await confirmDialog({ title: 'Kill the worker?', message: 'This stops all scan and monitoring cycles until you restart the worker.', confirmText: 'Kill worker', danger: true }))) return;
     try {
       await api('/worker/kill', { method: 'POST', body: '{}' });
-      toast('Worker killed — all cycles halted', 'warn');
+      toast('Worker killed. All cycles stopped.', 'warn');
       await refresh();
       hooks.patchCurrent();
     } catch (e) {

@@ -6,6 +6,7 @@ import { aiBlocked } from './ai-logic.js';
 import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
 import { autoRejectText } from './news-logic.js';
+import { handleWhyAct, personaBadge, whyHtml, whySig } from './explain.js';
 
 /* ---------- selectors over state ---------- */
 
@@ -36,13 +37,16 @@ function priceCell(label, value, sub, cls = '') {
   return `<div class="pc-price ${cls}"><dt>${label}</dt><dd class="mono">${value == null ? '—' : fmtMoney(value)}${sub ? `<small>${esc(sub)}</small>` : ''}</dd></div>`;
 }
 
+/** One line ("Within risk limits" / "Fails the risk check"). The numbers sit behind a fold; a failed check starts open. */
 function riskHtml(v) {
   const r = v.risk;
   if (!r.lines.length && !r.notes.length && r.ok == null) return '';
-  const head = r.ok === false ? '<span class="rc-bad">✕ Fails the risk check</span>' : '<span class="rc-ok">✓ Within risk limits</span>';
-  return `<div class="pc-risk"><div class="pc-risk-h"><span class="lbl">RISK CHECK</span>${head}</div>
+  const bad = r.ok === false;
+  const head = `<span class="lbl">RISK CHECK</span>${bad ? '<span class="rc-bad">✕ Fails the risk check</span>' : '<span class="rc-ok">✓ Within risk limits</span>'}`;
+  if (!r.lines.length && !r.notes.length) return `<div class="pc-risk"><div class="pc-risk-h">${head}</div></div>`;
+  return `<details class="pc-risk"${bad ? ' open' : ''}><summary class="pc-risk-h">${head}</summary>
     ${r.lines.length ? `<dl class="pc-risk-l">${r.lines.map((l) => `<div><dt>${esc(l.k)}</dt><dd class="mono">${esc(l.v)}</dd></div>`).join('')}</dl>` : ''}
-    ${r.notes.length ? `<ul class="pc-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}</div>`;
+    ${r.notes.length ? `<ul class="pc-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}</details>`;
 }
 
 function msgHtml(msg) {
@@ -54,14 +58,14 @@ function msgHtml(msg) {
 }
 
 function newsCtxHtml(n) {
-  if (!n || (!n.earnings && !n.flags.length && !n.note)) return '';
+  if (!n || (!n.earnings && !n.flags.length)) return '';
   const chips = [n.earnings ? `<span class="chip chip-${n.earnings.tone}">${n.earnings.soon ? '⚠ ' : ''}${esc(n.earnings.text)}</span>` : '', ...n.flags.map((f) => `<span class="chip chip-${f.blocking ? 'bad' : 'warn'}" title="${esc(f.help)}">${f.blocking ? '⛔ ' : '⚑ '}${esc(f.label)}</span>`)].filter(Boolean);
-  return `<div class="pc-news" aria-label="News and earnings">${chips.length ? `<div class="n-flags">${chips.join('')}</div>` : ''}${n.note ? `<div class="clamp pc-news-note"><span class="lbl">NEWS</span> ${esc(n.note)}</div>` : ''}</div>`;
+  return `<div class="pc-news" aria-label="News and earnings"><div class="n-flags">${chips.join('')}</div></div>`;
 }
 
 const spin = '<span class="spin" aria-hidden="true"></span>';
 
-export function cardHtml(v, busy, msg) {
+export function cardHtml(v, busy, msg, p = null) {
   const side = v.side;
   const expired = v.expired;
   const dis = busy || expired ? 'disabled' : '';
@@ -81,8 +85,9 @@ export function cardHtml(v, busy, msg) {
     <div class="rbar pc-bar" role="img" aria-label="${esc(barLabel)}" style="background:${bar}"><span class="rentry" style="left:${v.entryAt * 100}%"></span></div>
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
     ${newsCtxHtml(v.news)}
+    ${p ? whyHtml(p) : ''}
     ${riskHtml(v)}
-    <p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>
+    ${p ? (personaBadge(p) ? `<p class="pc-src dim">${personaBadge(p)}</p>` : '') : `<p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>`}
     <div class="pc-msgs" role="status" aria-live="polite">${msgHtml(msg)}</div>
     <div class="pc-actions">
       <button type="button" class="btn-reject" data-act="reject" ${dis} aria-label="Reject ${esc(v.symbol)} ${side} proposal">${busy === 'reject' ? `${spin} Rejecting…` : 'Reject'}</button>
@@ -92,8 +97,8 @@ export function cardHtml(v, busy, msg) {
 }
 
 /** Signature of everything a card shows except the ticking countdown text, so live polls only touch cards that changed. */
-function sigOf(v, busy, msg) {
-  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status]);
+function sigOf(v, busy, msg, p = null) {
+  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '']);
 }
 
 /** Keyed reconcile: keep untouched card nodes (scroll, expanded text, focus) and replace only the changed ones. */
@@ -153,9 +158,9 @@ function emptyPendingHtml() {
   const sm = state.summary;
   const ranNone = sm?.at && (sm.proposalCount ?? sm.proposed ?? 0) === 0 && !sm.trades?.length;
   const head = blocked ? 'The AI can’t run yet' : ranNone ? 'The last run proposed no trades' : 'No proposals waiting';
-  const lead = blocked ? `${esc(blocked.message)} ${blocked.actions.map((a) => `<a class="prop-link" href="${esc(a.href)}">${esc(a.label)}</a>`).join(' ')}` : ranNone ? 'The AI looked at the market and found nothing worth proposing. Nothing opened. You can run it again later.' : 'The AI never opens anything by itself. Here is how it works:';
+  const lead = blocked ? `${esc(blocked.message)} ${blocked.actions.map((a) => `<a class="prop-link" href="${esc(a.href)}">${esc(a.label)}</a>`).join(' ')}` : ranNone ? 'The AI found nothing worth proposing. Nothing opened. Run it again later.' : 'The AI never opens a trade by itself.';
   return `<div class="prop-empty"><strong>${head}</strong><p>${lead}</p>
-    <ol class="flow"><li><b>RUN</b> — the AI scans the market and proposes trades.</li><li><b>Review</b> — each proposal shows entry, stop, target, risk and the AI’s reasoning.</li><li><b>Approve or reject</b> — only approved proposals open a simulated position.</li></ol></div>`;
+    <ol class="flow"><li><b>RUN.</b> The AI scans the market and proposes trades.</li><li><b>Review.</b> Each proposal shows entry, stop, target, risk, and why.</li><li><b>Approve or reject.</b> Only approved proposals open a simulated position.</li></ol></div>`;
 }
 
 /* ---------- pending list ---------- */
@@ -164,7 +169,7 @@ function patchPending() {
   const host = $('prop-pending');
   if (!host) return;
   if (!state.loaded) return setHtml(host, skeleton(3));
-  if (state.proposals === null) return setHtml(host, empty('Proposals aren’t available from the server.'));
+  if (state.proposals === null) return setHtml(host, empty('No proposal data yet.'));
   const list = pendingList();
   if (!list.length) {
     const h = emptyPendingHtml();
@@ -176,12 +181,12 @@ function patchPending() {
   }
   host.__eh = null;
   const now = Date.now();
-  const items = list.map((p) => ({ key: String(p.id), v: proposalView(p, now) }));
+  const items = list.map((p) => ({ key: String(p.id), v: proposalView(p, now), p }));
   reconcile(
     host,
     items,
-    (it) => cardHtml(it.v, state.pendingBusy[it.key], state.pendingMsg[it.key]),
-    (it) => sigOf(it.v, state.pendingBusy[it.key], JSON.stringify(state.pendingMsg[it.key] || '')),
+    (it) => cardHtml(it.v, state.pendingBusy[it.key], state.pendingMsg[it.key], it.p),
+    (it) => sigOf(it.v, state.pendingBusy[it.key], JSON.stringify(state.pendingMsg[it.key] || ''), it.p),
   );
 }
 
@@ -286,7 +291,7 @@ async function rejectOne(id) {
   if (!p || state.pendingBusy[id]) return;
   const r = await modal({
     title: `Reject ${p.symbol} ${p.side}?`,
-    bodyHtml: `<p>Nothing will open. The proposal moves to History, where it is scored later so you can see whether passing on it was right.</p>
+    bodyHtml: `<p>Nothing opens. The proposal moves to History. The app scores it later, so you can see if rejecting it was right.</p>
       <label class="modal-field" for="rej-why">Reason (optional)<textarea id="rej-why" rows="3" maxlength="300" autocomplete="off" enterkeyhint="done" placeholder="e.g. too risky, don’t like this sector"></textarea></label>`,
     actions: [
       { id: 'cancel', label: 'Cancel', cls: 'btn-ghost' },
@@ -425,6 +430,13 @@ function onPendingClick(e) {
     case 'jump':
       jumpTo(b.dataset.target || 'pos-open');
       break;
+    case 'why':
+    case 'debate':
+    case 'debate-redo': {
+      const p = pendingList().find((x) => String(x.id) === id);
+      if (p) handleWhyAct(b.dataset.act, p, patchPending);
+      break;
+    }
     default:
   }
 }
@@ -469,6 +481,7 @@ function historyCard(p) {
     ${sv.tone !== 'none' ? `<div class="whatif whatif-${sv.tone}"><span class="whatif-h">${sv.icon ? `<span aria-hidden="true">${esc(sv.icon)}</span> ` : ''}<strong>${esc(sv.label)}</strong>${sv.amountText ? ` <span class="mono">${esc(sv.amountText)}</span>` : ''}</span>${sv.detail ? `<small>${esc(sv.detail)}</small>` : ''}</div>` : ''}
     ${posLine(p)}
     ${p.reason ? `<div class="clamp">${esc(p.reason)}</div>` : ''}
+    ${whyHtml(p)}
   </article>`;
 }
 
@@ -534,7 +547,20 @@ export function bindProposals() {
       return;
     }
     const pb = e.target.closest('[data-act="pos"]');
-    if (pb) jumpToPosition(pb.dataset.posId);
+    if (pb) return jumpToPosition(pb.dataset.posId);
+    const wb = e.target.closest('[data-act="why"], [data-act="debate"], [data-act="debate-redo"]');
+    const hid = wb?.closest('[data-hid]')?.dataset.hid;
+    const hp = hid && (state.history?.proposals || []).find((x) => String(x.id) === hid);
+    if (hp) {
+      const m = $('prop-history');
+      const keep = m.scrollTop;
+      handleWhyAct(wb.dataset.act, hp, () => {
+        if (m.__h !== undefined) m.__h = null; // force setHtml to repaint
+        patchHistory();
+        m.scrollTop = keep;
+        m.querySelector(`[data-hid="${CSS.escape(hid)}"] [data-act="${wb.dataset.act}"]`)?.focus({ preventScroll: true });
+      });
+    }
   });
   setPropTab(state.propTab);
 }

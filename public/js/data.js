@@ -10,7 +10,7 @@ export function refresh() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const [status, dashboard, picks, positions, summary, perf, proposals, budget, schedule, research] = await Promise.all([
+      const [status, dashboard, picks, positions, summary, perf, proposals, budget, schedule, research, gamify, totw, calendar, mood] = await Promise.all([
         api('/status'),
         apiOptional('/dashboard'),
         apiOptional('/ai/picks'),
@@ -21,8 +21,12 @@ export function refresh() {
         apiOptional('/budget'),
         apiOptional('/schedule'),
         apiOptional('/research/latest'),
+        apiOptional('/gamify'),
+        apiOptional('/trade-of-the-week'),
+        apiOptional('/calendar'),
+        apiOptional('/mood'),
       ]);
-      Object.assign(state, { status, dashboard, picks, positions, summary, perf, proposals: proposals ?? state.proposals, budget: budget ?? state.budget, schedule: schedule ?? state.schedule, research: research ?? state.research, loaded: true, loadError: null, lastUpdate: new Date() });
+      Object.assign(state, { status, dashboard, picks, positions, summary, perf, proposals: proposals ?? state.proposals, budget: budget ?? state.budget, schedule: schedule ?? state.schedule, research: research ?? state.research, gamify: gamify ?? state.gamify, totw: totw ?? state.totw, calendar: calendar ?? state.calendar, mood: mood ?? state.mood, loaded: true, loadError: null, lastUpdate: new Date() });
       if (status.run) {
         state.run = { ...(state.run || {}), ...status.run };
         if (status.run.running && !runTracking) {

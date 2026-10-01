@@ -4,6 +4,7 @@
 import { config } from '../config.js';
 import { store } from '../db/store.js';
 import { isCrypto } from './market.js';
+import { PERSONAS, isPersonaId } from './personas.js';
 
 export const MOCK_MODEL = 'mock-llm';
 let warned = false;
@@ -65,10 +66,21 @@ function traderReply(input) {
         allocationUsd: Math.round(equity * 0.05),
         stopLoss: +(price - dir * atrAbs * 2).toFixed(4),
         takeProfit: +(price + dir * atrAbs * 3.5).toFixed(4),
-        reason: 'DEMO DATA: canned trade from the mock LLM',
+        reason: `DEMO DATA: ${PERSONAS[isPersonaId(input?.voice) ? input.voice : 'default'].demo}`,
       };
     });
   return { summary: 'DEMO DATA: the mock LLM proposed the top candidates. This is a test fixture, not a real analysis.', trades };
+}
+
+function debateReply(input) {
+  const p = input?.proposal || {};
+  const v = isPersonaId(input?.voice) ? PERSONAS[input.voice].demo : 'canned debate from the mock LLM';
+  const lean = Number(p.confidence) >= 0.7 ? 'for' : Number(p.confidence) <= 0.55 ? 'against' : 'even';
+  return {
+    forTrade: { thesis: `DEMO DATA: ${v}. The case FOR ${p.side || 'the trade'} ${p.symbol || ''}.`, points: ['DEMO DATA: canned supporting point (not a real analysis)', `Reward-to-risk is ${p.rewardToRisk ?? 'unknown'}`] },
+    againstTrade: { thesis: 'DEMO DATA: the case AGAINST the trade (canned).', points: ['DEMO DATA: canned counter-point (not a real analysis)'] },
+    verdict: { lean, note: 'DEMO DATA: canned moderator note from the mock LLM.' },
+  };
 }
 
 function newsReply(input) {
@@ -101,7 +113,7 @@ export function mockChat({ bot, user }) {
   } catch {
     /* canned reply with empty input */
   }
-  const out = bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : bot === 'news' ? newsReply(input) : { items: [] };
+  const out = input?.task === 'bull_bear_debate' ? debateReply(input) : bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : bot === 'news' ? newsReply(input) : { items: [] };
   const content = JSON.stringify(out);
   return { content, usage: { prompt_tokens: Math.ceil(String(user).length / 4), completion_tokens: Math.ceil(content.length / 4), cost: 0 } };
 }

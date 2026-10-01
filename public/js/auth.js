@@ -1,6 +1,7 @@
 import { api, escapeHtml as esc, onSessionEnded, onSetupRequired, setAuthMode } from './api.js';
 import { authErrorMessage, canSignUp, initialAuthView, isSetupMode, needsAuthScreen, passwordStrength, retryAfterSeconds, shortEmail, validateLogin, validateSignup } from './auth-logic.js';
 import { barsCache, destroyCharts, root, state } from './state.js';
+import { resetWhatif } from './whatif.js';
 import { toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -51,7 +52,13 @@ export function lock(reason = '') {
   if (state.locked) return;
   state.locked = true;
   // wipe private state + rendered DOM
-  Object.assign(state, { loaded: false, loadError: null, status: null, dashboard: null, picks: null, positions: null, summary: null, perf: null, runs: null, logs: null, run: null, runLastStage: null, runLocal: null, account: null, selectedPos: null, quotes: [] });
+  Object.assign(state, { loaded: false, loadError: null, status: null, dashboard: null, picks: null, positions: null, summary: null, perf: null, runs: null, logs: null, run: null, runLastStage: null, runLocal: null, account: null, selectedPos: null, quotes: [], gamify: null, totw: null, calendar: null, mood: null, why: {}, debateUi: {}, debateLocal: {} });
+  resetWhatif();
+  const mb = $('mood-bar');
+  if (mb) {
+    mb.innerHTML = '';
+    mb.__h = undefined;
+  }
   state.auth.user = null;
   barsCache.clear();
   try {

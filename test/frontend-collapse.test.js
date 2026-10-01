@@ -43,3 +43,24 @@ test('sectionLabel joins title and summary', () => {
   assert.equal(sectionLabel('budget', '$1 of $20'), 'Budget, $1 of $20');
   assert.equal(sectionLabel('picks', ''), 'Top picks');
 });
+
+import fs from 'node:fs';
+import { foldAllTarget } from '../public/js/collapse-logic.js';
+
+test('foldAllTarget: collapse while anything is open, expand only when everything is collapsed', () => {
+  assert.equal(foldAllTarget([true, false, false]), false);
+  assert.equal(foldAllTarget([true, true]), false);
+  assert.equal(foldAllTarget([false, false]), true);
+  assert.equal(foldAllTarget([]), true);
+});
+
+test('the CSS order of dashboard sections matches the registry order (so the list never drifts)', () => {
+  const css = fs.readFileSync(new URL('../public/css/dashboard.css', import.meta.url), 'utf8');
+  const block = css.slice(css.indexOf('dashboard layout: one column of collapsible sections'));
+  const idOf = (k) => (k === 'budget' ? 'sec-budget-w' : `dsec-${k}`);
+  const order = Object.fromEntries([...block.matchAll(/#([\w-]+)\s*\{\s*order:\s*(\d+);/g)].map((m) => [m[1], Number(m[2])]));
+  const ranks = SECTION_KEYS.map((k) => order[idOf(k)]);
+  assert.ok(ranks.every(Number.isInteger), `every section needs an order rule: ${JSON.stringify(ranks)}`);
+  assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), 'registry order = on-screen order');
+  assert.equal(new Set(ranks).size, ranks.length, 'no two sections share a slot');
+});

@@ -2,12 +2,23 @@ import { api, apiOptional, clsPos, escapeHtml as esc, fmtDateTime, fmtMoney } fr
 import { LineChart } from './charts.js';
 import { bannersHtml } from './dashboard.js';
 import { baselineVerdicts, MIN_BASELINE_N } from './ai-logic.js';
-import { calibrationBar } from './run-logic.js';
+import { reliabilitySvg } from './fun-logic.js';
+import { mountWhatif, whatifShellHtml } from './whatif.js';
 import { $, charts, empty, pctOf, root, setHtml, skeleton, state } from './state.js';
 
 /* ---------- performance ---------- */
 
-export function perfShellHtml() {
+export function perfShellHtml({ compact = false } = {}) {
+  // Compact (dashboard): headline numbers and the equity chart. The Performance page has the rest.
+  if (compact) {
+    return `<div class="perf-layout perf-compact"><div class="perf-main">
+      <div id="perf-stats" class="perf-cards"></div>
+      <div class="perf-chart-title">EQUITY CURVE</div>
+      <div class="chart-area perf-chart"><canvas id="equity-chart"></canvas></div>
+      <p class="sr-only" id="equity-sum"></p>
+      <div class="sr-only" id="equity-table"></div>
+    </div></div>`;
+  }
   return `<div class="perf-layout">
     <div class="perf-main">
       <div id="perf-stats" class="perf-cards"></div>
@@ -32,8 +43,8 @@ export function perfShellHtml() {
 
 /** 'No closed trades yet' / 'Only 1 closed trade' / 'Only 7 closed trades' (singular/plural handled). */
 export function closedNote(n) {
-  const tail = 'treat these numbers as anecdotal until there are 20+.';
-  return n === 0 ? `No closed trades yet — ${tail}` : `Only ${n} closed trade${n === 1 ? '' : 's'} — ${tail}`;
+  const tail = 'Treat these numbers as weak until you have 20 or more.';
+  return n === 0 ? `No closed trades yet. ${tail}` : `Only ${n} closed trade${n === 1 ? '' : 's'}. ${tail}`;
 }
 
 export function statCard(label, value, cls = '', sub = '') {
@@ -49,7 +60,7 @@ export function patchPerf() {
     return;
   }
   if (!p) {
-    setHtml(stats, '<div class="empty">Performance data isn’t available yet (the server has no /api/performance data, or there are no closed trades).</div>');
+    setHtml(stats, '<div class="empty">No performance data yet.</div>');
     charts.equity?.set([]);
     setHtml($('perf-calib'), '');
     setHtml($('perf-bots'), '');
@@ -74,18 +85,7 @@ export function patchPerf() {
   const curve = (p.equityCurve || []).map((e) => ({ t: e.t, v: e.equity }));
   charts.equity.set(curve, { baseline: Number.isFinite(start) && start > 0 ? start : curve[0]?.v });
 
-  const cal = p.calibration || [];
-  setHtml(
-    $('perf-calib'),
-    cal.length
-      ? `<ul class="calib">${cal
-          .map((c) => {
-            const { mid, hitRate: hr } = calibrationBar(c);
-            return `<li><span class="calib-l mono">${esc(c.bucket)}</span><span class="calib-bar" role="img" aria-label="${esc(c.bucket)} confidence: hit rate ${hr.toFixed(0)}% over ${c.n} picks"><span class="calib-fill" style="width:${Math.min(100, hr)}%"></span>${mid != null ? `<span class="calib-ideal" style="left:${mid}%" title="Perfect calibration"></span>` : ''}</span><span class="calib-v mono">${hr.toFixed(0)}% <span class="dim">n=${c.n}</span></span></li>`;
-          })
-          .join('')}</ul><div class="dim calib-note">Bar = actual hit rate; tick = stated confidence. Bars left of the tick mean the model is overconfident.</div>`
-      : empty('Not enough scored picks yet'),
-  );
+  setHtml($('perf-calib'), calibrationHtml(p));
   setHtml($('perf-edge'), edgeHtml(p));
   setHtml($('perf-approval'), approvalHtml(p));
   setHtml($('perf-base'), baselinesHtml(p));
@@ -95,6 +95,24 @@ export function patchPerf() {
 }
 
 const signed = (n) => (n == null ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmtMoney(Math.abs(n), 2)}`);
+
+/** Reliability diagram (stated confidence vs actual hit rate) with a plain-language verdict and an accessible table. */
+export function calibrationHtml(p) {
+  const ch = p.calibrationChart;
+  const sm = ch?.summary;
+  if (!sm || !sm.n) return empty('Not enough scored picks yet');
+  const pc = (x) => (x == null ? '—' : `${(x * 100).toFixed(0)}%`);
+  const better = sm.brier != null && sm.brierBaseline != null && sm.brier < sm.brierBaseline;
+  return `<div class="rel">
+    <div class="rel-chart">${reliabilitySvg(ch, { size: Math.round(Math.min(340, Math.max(240, $('perf-calib')?.clientWidth || 300))) })}</div>
+    <div class="rel-side">
+      <p class="rel-verdict rel-${esc(sm.verdict)}"><strong>${esc(sm.verdictText)}</strong></p>
+      <dl class="rel-stats"><div><dt>Says on average</dt><dd class="mono">${pc(sm.avgConfidence)}</dd></div><div><dt>Actually right</dt><dd class="mono">${pc(sm.hitRate)}</dd></div><div><dt>Brier score</dt><dd class="mono">${sm.brier == null ? '—' : sm.brier.toFixed(3)}</dd><small class="dim">${better ? 'beats' : 'does not beat'} always guessing the base rate (${sm.brierBaseline == null ? '—' : sm.brierBaseline.toFixed(3)}); lower is better</small></div></dl>
+      <p class="dim calib-note"><span class="rel-key rel-under" aria-hidden="true"></span> on or above the diagonal: it delivers at least what it claims. <span class="rel-key rel-over" aria-hidden="true"></span> below: overconfident. Bar = 95% range; bigger dot = more picks.</p>
+    </div>
+    <table class="sr-only"><caption>Calibration by confidence bucket</caption><thead><tr><th scope="col">Confidence</th><th scope="col">Picks</th><th scope="col">Actual hit rate</th></tr></thead><tbody>${ch.buckets.filter((b) => b.n > 0).map((b) => `<tr><th scope="row">${esc(b.bucket)}</th><td>${b.n}</td><td>${pc(b.hitRate)}</td></tr>`).join('')}</tbody></table>
+  </div>`;
+}
 
 /** Net edge hero with its breakdown, avoided loss and missed gain. */
 export function edgeHtml(p) {
@@ -145,7 +163,7 @@ export function baselinesHtml(p) {
   const win = bl.window?.from ? `Window: ${esc(fmtDateTime(bl.window.from))} to ${esc(fmtDateTime(bl.window.to))}` : 'No comparison window yet';
   return `<table class="table base"><thead><tr><th scope="col">STRATEGY</th><th scope="col">P&amp;L</th><th scope="col">RETURN</th><th scope="col">N</th></tr></thead><tbody>${row('AI proposals', bl.ai, 'is-ai')}${row('SPY buy &amp; hold', bl.spyHold)}${row('Random picks', bl.randomPicks)}</tbody></table>
     <ul class="vchips">${chips}</ul>
-    <p class="dim base-note">${win}. Same allocation and costs for each. Verdicts need at least ${MIN_BASELINE_N} scored trades on both sides; below that the result is mostly luck.</p>`;
+    <p class="dim base-note">${win}. Each strategy uses the same size and costs. A verdict needs ${MIN_BASELINE_N} or more scored trades on each side. With fewer, the result is mostly luck.</p>`;
 }
 
 /* performance page */
@@ -153,8 +171,10 @@ export function mountPerformance() {
   root.innerHTML = `<div class="page">
     <div id="banners"></div>
     <section class="widget perf-section" aria-labelledby="h-perf"><h2 class="widget-title" id="h-perf">PERFORMANCE</h2>${perfShellHtml()}</section>
+    ${whatifShellHtml()}
     <section class="widget" style="margin-top:12px" aria-labelledby="h-runs"><h2 class="widget-title" id="h-runs">RUN HISTORY</h2><div id="runs"></div></section>
   </div>`;
+  mountWhatif();
   patchPerformancePage();
   loadRuns();
 }

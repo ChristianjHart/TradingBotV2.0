@@ -17,8 +17,8 @@ const SKIP_TEXT = {
   insufficient_budget: 'not enough AI budget left for a run',
   no_api_key: 'no OpenRouter key',
   budget_exhausted: 'monthly AI budget used up',
-  budget_warn_event_dropped: 'budget is running low, so event runs are paused',
-  older_than_grace: 'missed by more than 20 minutes (e.g. the server was restarting)',
+  budget_warn_event_dropped: 'the budget is low, so the app pauses event runs',
+  older_than_grace: 'missed by more than 20 minutes, for example during a server restart',
 };
 /** Plain-language skip reason; unknown codes are shown as given (with underscores turned into spaces). */
 export function skipReasonText(code) {
@@ -105,10 +105,10 @@ export function lastRunView(r) {
 const TEST_FIRE = {
   worker_not_running: ['The worker is stopped', 'Press START in the header menu first, then try again.'],
   run_in_progress: ['A run is already in progress', 'Wait for it to finish (see the progress bar on the dashboard), then try again.'],
-  no_api_key: ['No OpenRouter key', 'Add your OpenRouter key under Settings → Account. The AI is required; there is no fallback.'],
+  no_api_key: ['No OpenRouter key', 'Add your OpenRouter key under Settings → Account. The AI needs it. There is no fallback.'],
   budget_exhausted: ['Monthly AI budget used up', 'Raise the cap under Settings → AI budget, or wait for the reset.'],
   insufficient_budget: ['Not enough budget left for a full run', 'The remaining budget is below the projected cost of one run. Raise the cap or wait for the reset.'],
-  unknown_slot: ['That time slot no longer exists', 'The list was out of date. It has been refreshed; pick a slot again.'],
+  unknown_slot: ['That time slot no longer exists', 'The list was out of date. The app refreshed it. Pick a slot again.'],
 };
 export function testFireMessage(err) {
   const code = err?.code || err?.data?.code;

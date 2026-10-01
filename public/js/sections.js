@@ -1,4 +1,4 @@
-import { isSectionOpen, parseSectionPrefs, SECTIONS, SECTIONS_STORE_KEY, sectionLabel, sectionSummary, withSection } from './collapse-logic.js';
+import { foldAllTarget, isSectionOpen, parseSectionPrefs, SECTIONS, SECTIONS_STORE_KEY, sectionLabel, sectionSummary, withSection } from './collapse-logic.js';
 
 /* Collapsible dashboard sections (phones only: CSS shows the toggle and honours .is-collapsed below 700px). */
 
@@ -20,10 +20,10 @@ function save() {
   }
 }
 
-/** Phone-only header: a button inside a level-2 heading. Desktop hides it (CSS) and keeps the widget's own h2. */
-export function sectionHeadHtml(key) {
+/** Section header: a toggle button (title, one-line summary, chevron) inside a level-2 heading, plus an optional link such as "Manage". */
+export function sectionHeadHtml(key, link = null) {
   const open = isSectionOpen(load(), key);
-  return `<div class="dsec-hw" role="heading" aria-level="2"><button type="button" class="dsec-h" data-dsec-toggle="${key}" aria-expanded="${open}" aria-controls="dsec-${key}"><span class="dsec-t">${SECTIONS[key].title}</span><span class="dsec-s"></span><svg class="dsec-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
+  return `<div class="dsec-hw" role="heading" aria-level="2"><button type="button" class="dsec-h" data-dsec-toggle="${key}" aria-expanded="${open}" aria-controls="dsec-${key}"><span class="dsec-t">${SECTIONS[key].title}</span><span class="dsec-s"></span><svg class="dsec-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>${link ? `<a class="dsec-a" href="${link.href}">${link.label}</a>` : ''}</div>`;
 }
 
 function setOpen(w, open) {
@@ -31,9 +31,31 @@ function setOpen(w, open) {
   w.querySelector('[data-dsec-toggle]')?.setAttribute('aria-expanded', String(open));
 }
 
+/** Label the fold button: "Collapse all" while any section is open, else "Expand all". */
+export function syncFoldButton() {
+  const b = document.getElementById('btn-fold');
+  if (!b) return;
+  const anyOpen = !foldAllTarget([...document.querySelectorAll('[data-dsec]')].map((w) => !w.classList.contains('is-collapsed')));
+  b.textContent = anyOpen ? 'Collapse all' : 'Expand all';
+  b.setAttribute('aria-label', anyOpen ? 'Collapse all sections' : 'Expand all sections');
+}
+
+/** Collapse every section when any is open, else expand every section. Remembered like a single toggle. */
+export function foldAll() {
+  const ws = [...document.querySelectorAll('[data-dsec]')];
+  const open = foldAllTarget(ws.map((w) => !w.classList.contains('is-collapsed')));
+  for (const w of ws) {
+    prefs = withSection(load(), w.dataset.dsec, open);
+    setOpen(w, open);
+  }
+  save();
+  syncFoldButton();
+}
+
 /** Apply the remembered state to every section in the page. */
 export function applySections(rootEl = document) {
   rootEl.querySelectorAll('[data-dsec]').forEach((w) => setOpen(w, isSectionOpen(load(), w.dataset.dsec)));
+  syncFoldButton();
 }
 
 export function bindSections(rootEl) {
@@ -45,6 +67,7 @@ export function bindSections(rootEl) {
     prefs = withSection(load(), w.dataset.dsec, open);
     save();
     setOpen(w, open);
+    syncFoldButton();
   });
 }
 

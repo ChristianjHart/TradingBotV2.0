@@ -19,6 +19,14 @@ import { rateLimit, validateSettings, validSymbol, asyncHandler } from '../middl
 import { UNIVERSE } from '../services/universe.js';
 import { resolveAuth, authGate, csrfGuard, setupGuard } from '../auth/index.js';
 import { authRouter, accountRouter } from './auth.js';
+import { computeGamify } from '../services/gamify.js';
+import { tradeOfTheWeek } from '../services/highlights.js';
+import { debateProposal } from '../services/debate.js';
+import { validateWhatIf, runWhatIf } from '../services/whatif.js';
+import { getCalendar } from '../services/calendar.js';
+import { getMood } from '../services/mood.js';
+import { personaList } from '../services/personas.js';
+import { isAiError } from '../services/aiErrors.js';
 
 const router = Router();
 
@@ -28,6 +36,9 @@ const pollLimit = rateLimit({ windowMs: 60_000, max: 1200, name: 'poll' });
 const apiLimit = rateLimit({ windowMs: 60_000, max: 300, name: 'api' });
 router.use((req, res, next) => (req.method === 'GET' && !req.path.startsWith('/market') ? pollLimit : apiLimit)(req, res, next));
 const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run', refundWhen: (res) => res.statusCode === 200 });
+// The debate spends AI credits (cached results are free): tight window.
+const debateLimit = rateLimit({ windowMs: 10 * 60_000, max: 20, name: 'debate' });
+const AI_STATUS = { no_api_key: 409, budget_exhausted: 402, rate_limited: 429, model_unavailable: 502, invalid_output: 502, upstream_error: 502, timeout: 504 };
 
 /** JSON error with the error's own HTTP status when it has one, else `fallback`. */
 function sendError(res, err, fallback = 500) {
@@ -103,6 +114,26 @@ router.get('/performance', (_req, res) => {
     }),
   );
 });
+
+// ---- fun stuff: streaks & badges, trade of the week, what-if replay, calendar, market mood ----
+router.get('/gamify', (_req, res) => {
+  const positions = store.getPositions();
+  const proposals = store.getProposals();
+  const perf = computePerformance({ positions, snapshots: store.getEquity(), pickRecords: store.getPickScores(), proposals, settings: store.getSettings(), startingEquity: config.paperEquity });
+  res.json(computeGamify({ positions, proposals, perf }));
+});
+
+router.get('/trade-of-the-week', (_req, res) => res.json(tradeOfTheWeek(store.getPositions())));
+
+router.post('/whatif', asyncHandler(async (req, res) => {
+  const { value, error } = validateWhatIf(req.body);
+  if (error) return res.status(400).json({ error, code: 'invalid_params' });
+  res.json(await runWhatIf(value));
+}));
+
+router.get('/calendar', asyncHandler(async (req, res) => res.json(await getCalendar({ days: req.query.days }))));
+
+router.get('/mood', asyncHandler(async (_req, res) => res.json(await getMood())));
 
 // ---- budget + model catalog ----
 router.get('/budget', (_req, res) => res.json(budgetStatus()));
@@ -203,6 +234,17 @@ router.post('/proposals/approve-all', asyncHandler(async (_req, res) => res.json
 router.post('/proposals/:id/approve', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, () => approveProposal(req.params.id, { by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
 router.post('/proposals/:id/reject', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, async () => rejectProposal(req.params.id, { reason: req.body?.reason, by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
 
+// Bull-vs-bear debate for one proposal: ONE AI call, cached on the proposal (re-run with ?force=1), budget-governed, no fallback.
+router.post('/proposals/:id/debate', debateLimit, asyncHandler(async (req, res) => {
+  if (!PROPOSAL_ID.test(req.params.id)) return res.status(404).json({ error: 'proposal not found', code: 'not_found' });
+  try {
+    res.json(await debateProposal(req.params.id, { force: wantsForce(req) }));
+  } catch (err) {
+    if (isAiError(err)) return res.status(AI_STATUS[err.code] ?? 502).json({ error: err.message, code: err.code });
+    sendError(res, err);
+  }
+}));
+
 router.get('/positions', asyncHandler(async (_req, res) => {
   res.json(await listPositions());
 }));
@@ -248,6 +290,7 @@ router.get('/status', (_req, res) => {
     ai: aiStatus(), // { required:true, ready, blockedReason?, demo }
     budget: { ...budgetCompact(), projectedMonthEndUsd: budgetStatus().projectedMonthEndUsd, forecast: activeForecast() },
     proposalsPending: store.getProposals().filter((p) => p.status === 'pending').length,
+    personas: personaList(),
     mockData: alpaca.usingMock(),
     dataMode: alpaca.usingMock() ? 'mock' : 'alpaca',
     fallbacks: alpaca.getFallbacks(),
