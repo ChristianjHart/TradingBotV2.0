@@ -97,6 +97,20 @@ test('newsRunStatus: skipped / partial / error are obvious and explain why', () 
   assert.equal(newsRunStatus({ status: 'weird' }), null);
 });
 
+test('newsRunStatus: an AI timeout says what happened and links to the fix, not the raw error', () => {
+  const t = newsRunStatus({ status: 'error', reason: 'timeout: OpenRouter request timed out' });
+  assert.equal(t.tone, 'bad');
+  assert.match(t.text, /took too long/);
+  assert.match(t.text, /Symbols per run/);
+  assert.match(t.text, /The trader ran without news notes\./);
+  assert.doesNotMatch(t.text, /OpenRouter request timed out/);
+  assert.equal(t.link.href, '#settings/models');
+  assert.equal(newsRunStatus({ status: 'error', reason: 'rate_limited: HTTP 429' }).link.href, '#settings/models');
+  assert.equal(newsRunStatus({ status: 'error', reason: 'invalid_output: bad json' }).link, null);
+  const unknown = newsRunStatus({ status: 'error', reason: 'something_new: odd failure' });
+  assert.match(unknown.text, /something_new: odd failure/, 'unknown reasons still show the server text');
+});
+
 test('proposalNews + autoRejectText', () => {
   const n = proposalNews({ earningsInDays: 0, riskFlags: ['halt'], notes: 'Earnings today' });
   assert.equal(n.earnings.text, 'Earnings today');

@@ -790,3 +790,8 @@ test('status/health expose news availability without secrets', async () => {
   assert.equal((await api('GET', '/health')).text.includes(FH_KEY), false);
   assert.equal(typeof alpaca, 'object');
 });
+
+test('the news call gets more time than the trader call (it writes one note per symbol)', async () => {
+  const { NEWS_TIMEOUT_MS } = await import('../server/services/newsBot.js');
+  assert.ok(NEWS_TIMEOUT_MS >= 120_000 && NEWS_TIMEOUT_MS <= 170_000, String(NEWS_TIMEOUT_MS));
+});

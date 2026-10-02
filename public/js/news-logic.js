@@ -127,6 +127,16 @@ export function newsSummaryText(views) {
   return `${n} note${n === 1 ? '' : 's'}${soon ? ` · ${soon} earnings soon` : ''}${!soon && flagged ? ` · ${flagged} flagged` : ''}`;
 }
 
+const MODELS_LINK = { href: '#settings/models', label: 'Pick a news model' };
+/** AI failure codes (the run record stores `code: message`) -> plain words and the fix. */
+const NEWS_AI_ERRORS = {
+  timeout: { text: 'The news AI took too long. Pick a faster news model, or lower Symbols per run in Settings → News.', link: { href: '#settings/models', label: 'Pick a faster news model' } },
+  rate_limited: { text: 'OpenRouter is slowing the news model. Wait one minute, or pick another model.', link: MODELS_LINK },
+  model_unavailable: { text: 'OpenRouter says the news model is not available now. Pick another model.', link: MODELS_LINK },
+  invalid_output: { text: 'The news model gave an unusable answer.', link: null },
+  upstream_error: { text: 'OpenRouter returned an error for the news step.', link: null },
+};
+
 /** run.news -> {tone:'ok'|'warn'|'bad'|'off', title, text, link?}. Skipped / partial / error must be obvious. */
 export function newsRunStatus(news) {
   if (!news || typeof news !== 'object') return null;
@@ -141,8 +151,10 @@ export function newsRunStatus(news) {
       return { tone: 'warn', title: 'News: partial', text: finnhub ? 'No Finnhub key: earnings dates unknown. Add it in Settings → Account.' : reason ? `${reason}. ${counts}` : counts, link: finnhub ? { href: '#settings/account', label: 'Add Finnhub key' } : link, demo: !!news.demo };
     case 'skipped':
       return { tone: 'warn', title: 'News: skipped', text: reason || 'The news step did not run. The trader ran without news notes.', link, demo: !!news.demo };
-    case 'error':
-      return { tone: 'bad', title: 'News: failed', text: `${reason || 'The news step failed.'} The trader ran without news notes.`, link, demo: !!news.demo };
+    case 'error': {
+      const known = NEWS_AI_ERRORS[(/^([a-z_]+)(?::|$)/.exec(reason) || [])[1]];
+      return { tone: 'bad', title: 'News: failed', text: `${known ? known.text : reason || 'The news step failed.'} The trader ran without news notes.`, link: known ? known.link : link, demo: !!news.demo };
+    }
     default:
       return null;
   }
