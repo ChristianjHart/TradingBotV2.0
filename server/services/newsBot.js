@@ -14,6 +14,8 @@ import { isCrypto } from './market.js';
 import { newsSettings, cleanText, buildNewsPrompt, validateNotes, NEWS_SYSTEM } from './newsNotes.js';
 
 const MAX_SAVED = 3000;
+/** One call writes a note for every shortlisted symbol (up to 30), so a slow or busy model needs more than the trader's 90 s. */
+export const NEWS_TIMEOUT_MS = 150_000;
 const iso = (ms = Date.now()) => new Date(ms).toISOString();
 
 const emptyNews = (status, reason, extra = {}) => ({ status, reason, symbols: 0, headlines: 0, earningsKnown: 0, costUsd: 0, notes: 0, ...extra });
@@ -94,7 +96,7 @@ export async function runNewsStage(picks, { runId = `run_${Date.now()}` } = {}) 
       system: NEWS_SYSTEM,
       user: buildNewsPrompt(shortlist),
       maxTokens: 6000,
-      timeoutMs: 90_000,
+      timeoutMs: NEWS_TIMEOUT_MS,
       runId,
       validate: (json) => validateNotes(json, shortlist, { blackoutDays: ns.earningsBlackoutDays }),
     });
