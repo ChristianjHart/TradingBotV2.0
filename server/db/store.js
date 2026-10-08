@@ -63,6 +63,8 @@ const defaults = {
     netEdgeAvoidedWeight: 1,
     // Cosmetic voice of the trader bot's text (see services/personas.js). Never changes numbers or rules.
     botPersona: 'default',
+    // Give the trader plain-fact lessons from this desk's own results (services/review.js). OFF by default.
+    useLessons: false,
   },
   worker: {
     status: 'online',

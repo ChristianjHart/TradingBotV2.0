@@ -22,6 +22,7 @@ export const state = {
   history: null, // {proposals:[decided…], counts} (loaded lazily when the History tab is open)
   budget: null, // full /api/budget
   gamify: null, // /api/gamify: streaks + badges
+  review: null, // /api/review: loss review
   totw: null, // /api/trade-of-the-week
   calendar: null, // /api/calendar
   mood: null, // /api/mood

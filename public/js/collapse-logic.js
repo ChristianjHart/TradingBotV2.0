@@ -8,7 +8,7 @@ export const SECTIONS = {
   news: { title: 'News & earnings', open: false },
   cal: { title: 'Calendar', open: false },
   perf: { title: 'Performance', open: false },
-  acc: { title: 'Accuracy', open: false },
+  review: { title: 'Loss review', open: false },
   fun: { title: 'Achievements', open: false },
   totw: { title: 'Trade of the week', open: false },
   alloc: { title: 'Allocation', open: false },
@@ -62,6 +62,8 @@ export function sectionSummary(key, d = {}) {
       return d.text || '';
     case 'sched':
       return d.text || '';
+    case 'review':
+      return d.text || '';
     case 'fun':
       return d.text || '';
     case 'totw':
@@ -74,8 +76,6 @@ export function sectionSummary(key, d = {}) {
       return d.picksCount == null ? '' : String(d.picksCount);
     case 'perf':
       return Number.isFinite(d.netEdge) ? `net edge ${usd0(d.netEdge)}` : d.closed === 0 ? 'no closed trades yet' : '';
-    case 'acc':
-      return d.closed ? `${Math.round(d.winRatePct)}% win rate` : 'no closed trades';
     case 'alloc':
       return Number.isFinite(d.cashPct) ? `${Math.round(d.cashPct)}% cash` : '';
     default:

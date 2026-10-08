@@ -113,6 +113,10 @@ export function replayTrades({ proposals, barsBy, params, settings, now = Date.n
   rows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const b = summarize(rows.map((r) => ({ at: r.at, pnl: r.basePnl })), startEquity);
   const s = summarize(rows.map((r) => ({ at: r.at, pnl: r.scenPnl })), startEquity);
+  // Did the change help in BOTH halves of the timeline? (A change that only helps one half is probably luck.)
+  const half = Math.floor(rows.length / 2);
+  const sumDelta = (list) => r2(list.reduce((s, r) => s + r.scenPnl - r.basePnl, 0));
+  const halves = rows.length >= 6 ? { first: sumDelta(rows.slice(0, half)), second: sumDelta(rows.slice(half)) } : null;
   const movers = [...rows].map((r) => ({ ...r, delta: r2(r.scenPnl - r.basePnl) })).sort((a, c) => Math.abs(c.delta) - Math.abs(a.delta)).slice(0, 8);
   return {
     params: p,
@@ -120,6 +124,7 @@ export function replayTrades({ proposals, barsBy, params, settings, now = Date.n
     skipped,
     baseline: b.stats,
     scenario: s.stats,
+    halves,
     delta: { pnl: r2(s.stats.pnl - b.stats.pnl), winRate: s.stats.winRate !== null && b.stats.winRate !== null ? +(s.stats.winRate - b.stats.winRate).toFixed(4) : null },
     unchanged: p.stopMult === 1 && p.targetMult === 1 && p.sizeMult === 1 && p.horizonHours === null && p.breakEven === null && p.trailR === null,
     curves: { baseline: b.curve, scenario: s.curve },
@@ -128,7 +133,7 @@ export function replayTrades({ proposals, barsBy, params, settings, now = Date.n
   };
 }
 
-async function fetchBars(symbols) {
+export async function fetchBars(symbols) {
   const barsBy = new Map();
   const list = [...symbols];
   let i = 0;

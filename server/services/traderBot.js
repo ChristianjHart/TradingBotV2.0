@@ -11,6 +11,7 @@ import { createProposals, autoApproveProposals } from './proposals.js';
 import { MOCK_MODEL } from './mockLlm.js';
 import { newsGuard } from './newsNotes.js';
 import { personaOf, voiceInstruction } from './personas.js';
+import { buildReview, lessonsPrompt } from './review.js';
 
 const SYSTEM = `You are a disciplined risk-aware trading desk. You receive screened candidates (with price and ATR% = hourly average true range as % of price), the account state, and the number of free position slots.
 You only PROPOSE trades: a human reviews and approves each one, so be selective and explain each proposal in one sentence. Decide which candidates are actually worth trading and choose AT MOST the given number of slots. For each trade give: symbol, side ("long" or "short"), allocationUsd (dollars of the account to commit), stopLoss (a price that exits the trade if it moves against us, so we never lose the whole allocation), takeProfit (a price at which we lock in the gain), and a one-sentence reason.
@@ -90,10 +91,16 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
   }
 
   const persona = personaOf(settings);
+  // Opt-in feedback loop: fact lines from this desk's own results, only when there is enough data to say anything.
+  const lessons = settings.useLessons === true ? (() => {
+    const rv = buildReview({ proposals: store.getProposals(), positions: store.getPositions(), startingEquity: config.paperEquity });
+    return rv.enough ? rv.lessons : [];
+  })() : [];
+  if (lessons.length) store.addLog({ level: 'info', message: `trader bot: giving the AI ${lessons.length} lesson${lessons.length === 1 ? '' : 's'} from past results` });
   const ai = await chatJson({
     bot: 'trader',
     model: config.openrouter.traderModel,
-    system: SYSTEM + voiceInstruction(persona),
+    system: SYSTEM + voiceInstruction(persona) + lessonsPrompt(lessons),
     user: JSON.stringify({
       ...(persona.style ? { voice: persona.id } : {}),
       account: { equity: account.equity, cash: account.cash },
@@ -189,7 +196,7 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     note = `${note}${note ? ' ' : ''}[levels replaced: ${adjusted.join('; ')}]`.slice(0, 1500);
     store.addLog({ level: 'info', message: `trader bot replaced levels: ${adjusted.join('; ')}` });
   }
-  const created = items.length || blocked.length ? createProposals({ runId, items, blocked, source, models: { scanner: scannerModel, trader: model }, persona: persona.id, regime: regime?.line ?? null }) : [];
+  const created = items.length || blocked.length ? createProposals({ runId, items, blocked, source, models: { scanner: scannerModel, trader: model }, persona: persona.id, regime: regime?.line ?? null, lessonIds: lessons.map((l) => l.id) }) : [];
   const proposals = created.filter((p) => p.status === 'pending');
   const newsBlocked = created.filter((p) => p.status === 'rejected');
   for (const p of newsBlocked) store.addLog({ level: 'info', message: `news guard auto-rejected ${p.side.toUpperCase()} ${p.symbol}: ${p.rejectReason}` });
@@ -212,5 +219,6 @@ export async function runTraderBot(picks, { regime, runId = `run_${Date.now()}`,
     usage: ai.usage,
     repaired: ai.repaired,
     persona: persona.id,
+    lessons: lessons.length,
   };
 }

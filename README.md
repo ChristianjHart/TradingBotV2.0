@@ -121,11 +121,13 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 | POST | `/api/schedule/test-fire` | Body `{slotId?}`. Runs through the same gate as a scheduled run, marked `trigger.type:'test'`; 202 `{started, trigger, run}`. 409 `code`: `worker_not_running` \| `run_in_progress` \| `no_api_key` \| `budget_exhausted` \| `insufficient_budget`; 400 `unknown_slot` |
 | GET | `/api/schedule/forecast?plan=A\|B\|C\|D\|custom` | Monthly cost forecast per plan (all plans + `current` when `plan` is omitted; 400 `invalid_plan`) |
 | GET | `/api/schedule/experiments` | Per plan and trigger type: runs, avg cost, proposals/run, approval rate, net edge, edge per dollar (null until enough samples) |
-| PATCH | `/api/settings` | `botPersona` (see *Fun features*), slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight`, `schedule` (partial object, deep-merged; see *Run schedules*) |
+| PATCH | `/api/settings` | `useLessons` (see *Loss review*), `botPersona` (see *Fun features*), slippage/fees/risk limits/horizon, `autoApprove`, `autoApproveMaxAllocPct`, `proposalTtlHours`, `monthlyAiBudgetUsd`, `netEdgeDrawdownWeight`, `netEdgeAvoidedWeight`, `schedule` (partial object, deep-merged; see *Run schedules*) |
 | GET | `/api/gamify` | `{streaks:{win:{current,best,closed}, calls:{current,best,judged}}, stats, badges:[{id,emoji,name,desc,group,earned,progress:{value,target}}], earnedCount, total, recentCalls}`. Derived from stored trades and proposals; nothing is persisted |
 | GET | `/api/trade-of-the-week` | `{trade, window, candidates}`: best profitable closed trade of the last 7 days with a templated `caption` (`trade` is `null` when there is none) |
 | POST | `/api/proposals/:id/debate` | One AI call returning the case FOR and AGAINST that proposal plus a lean; saved on the proposal, so repeats are free (`?force=1` re-runs and re-spends). Budget-governed (billed under bot `other`), no fallback. Errors: 404, 409 `no_api_key`, 402 `budget_exhausted`, 429 `rate_limited`, 502 `invalid_output`\|`model_unavailable`\|`upstream_error`, 504 `timeout` |
 | POST | `/api/whatif` | Body (all optional) `{stopMult, targetMult (0.25-4), sizeMult (0.1-3), horizonHours (1-168), breakEven, trailR (0-10), scope: all\|approved\|declined}` → baseline vs scenario P&L, win rate, drawdown, both cumulative curves, biggest movers and honest `skipped` counts |
+| GET | `/api/review` | Loss review: money (result, costs, biggest loss, stop-outs), weakest groups with their chance of being luck, lessons, and a with/without-lessons comparison. See [`docs/LOSS-REVIEW.md`](docs/LOSS-REVIEW.md) |
+| GET | `/api/review/experiments` | Replays past proposals under seven ready-made rule changes; each result says whether it helped in both halves of the timeline |
 | GET | `/api/calendar?days=21` | Earnings (Finnhub; what you hold, what is proposed, the scanner's top picks), FOMC decisions, the jobs report and NYSE closures, grouped by ET day (max 28 days). `earningsAvailable:false` when there is no Finnhub key |
 | GET | `/api/mood` | Homemade 0-100 fear/greed-style index with its components, plus SPY/QQQ/IWM/BTC quotes |
 | GET | `/api/health` | Public |
@@ -135,6 +137,10 @@ Everything below except `/api/health` and `/api/auth/*` needs a session cookie o
 ## Dashboard layout
 
 Proposals stay open at the top. Every other block is a one-line section with a summary (for example "net edge +$1,528"). **Positions** is the only section open by default. Use the arrow on a section, or **Collapse all / Expand all**, to change this. The choice is saved in your browser. In the calendar, each day also folds. News shows 4 notes first, the dashboard performance block shows headline numbers and the equity chart (full tables live on the Performance page), and each proposal card folds its risk numbers behind one line. Copy rules are in [`docs/COPY-STYLE.md`](docs/COPY-STYLE.md).
+
+## Loss review (learning from losses)
+
+The dashboard section **Loss review** shows where the money went, which kinds of trade look weak, and how likely each is to be plain luck. It can pass solid findings to the trader as facts (switch **off** by default). It does not retrain any model. With a few weeks of data it will usually report "no clear pattern": it needs roughly 250 to 400 scored outcomes to find a moderate leak. The method, the guards against noise, and the measured false-alarm and detection rates are in [`docs/LOSS-REVIEW.md`](docs/LOSS-REVIEW.md). Re-measure with `node scripts/review-sim.mjs`.
 
 ## Fun features
 

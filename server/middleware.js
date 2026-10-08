@@ -107,6 +107,7 @@ export const SETTING_RULES = {
   netEdgeDrawdownWeight: num(0, 10),
   netEdgeAvoidedWeight: num(0, 10),
   botPersona: isPersonaId, // cosmetic voice of the trader bot (closed whitelist, see services/personas.js)
+  useLessons: bool, // OFF by default; when true the trader prompt carries fact lines from the loss review
 };
 
 /** Returns { value } of accepted fields, or { error } naming the first bad/unknown one. */

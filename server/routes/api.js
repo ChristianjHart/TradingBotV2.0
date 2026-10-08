@@ -27,6 +27,8 @@ import { getCalendar } from '../services/calendar.js';
 import { getMood } from '../services/mood.js';
 import { personaList } from '../services/personas.js';
 import { isAiError } from '../services/aiErrors.js';
+import { buildReview } from '../services/review.js';
+import { runExperiments } from '../services/experiments.js';
 
 const router = Router();
 
@@ -122,6 +124,16 @@ router.get('/gamify', (_req, res) => {
   const perf = computePerformance({ positions, snapshots: store.getEquity(), pickRecords: store.getPickScores(), proposals, settings: store.getSettings(), startingEquity: config.paperEquity });
   res.json(computeGamify({ positions, proposals, perf }));
 });
+
+// Loss review: where the money went and which kinds of trade lose again and again (guarded against noise; see services/review.js).
+router.get('/review', (_req, res) => {
+  const positions = store.getPositions();
+  const proposals = store.getProposals();
+  const perf = computePerformance({ positions, snapshots: store.getEquity(), pickRecords: store.getPickScores(), proposals, settings: store.getSettings(), startingEquity: config.paperEquity });
+  res.json({ ...buildReview({ proposals, positions, startingEquity: config.paperEquity, baselines: perf.baselines }), useLessons: store.getSettings().useLessons === true });
+});
+// Replays past proposals under ready-made rule changes (fetches price history, so it is a separate call).
+router.get('/review/experiments', asyncHandler(async (_req, res) => res.json(await runExperiments())));
 
 router.get('/trade-of-the-week', (_req, res) => res.json(tradeOfTheWeek(store.getPositions())));
 

@@ -34,7 +34,6 @@ test('sectionSummary shows the key number', () => {
   assert.equal(sectionSummary('perf', { netEdge: 0 }), 'net edge $0');
   assert.equal(sectionSummary('perf', { netEdge: NaN, closed: 0 }), 'no closed trades yet');
   assert.equal(sectionSummary('picks', { picksCount: 20 }), '20');
-  assert.equal(sectionSummary('acc', { closed: 4, winRatePct: 62.5 }), '63% win rate');
   assert.equal(sectionSummary('alloc', { cashPct: 90.4 }), '90% cash');
   assert.equal(sectionSummary('sum', { proposalCount: 3 }), '3 proposed');
 });
