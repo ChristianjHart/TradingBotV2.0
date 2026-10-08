@@ -1,6 +1,7 @@
 import { api, escapeHtml as esc } from './api.js';
 import { refresh } from './data.js';
 import { exitLabel, ideaRows, impactText, moneyTiles, plainUsd, reviewSummary, usd, weakRows } from './review-logic.js';
+import { scorecardView } from './judge-logic.js';
 import { $, empty, hooks, setHtml, skeleton, state } from './state.js';
 import { toast } from './ui.js';
 
@@ -36,6 +37,15 @@ function ideasHtml() {
     <p class="dim rv-note">${ex.replayed} past proposals. ${esc(ex.note)}</p><button type="button" class="btn-ghost" data-rv="ideas">Run again</button>`;
 }
 
+/** "Does the AI checker help?": what it said versus what happened. */
+function checkerHtml(rv) {
+  const v = scorecardView(rv.judge);
+  if (!v || !v.judged) return `<p class="dim">No result yet. Ask the AI checker about a pending proposal. After the result is known, this shows if its TAKE calls did better than its SKIP calls.</p>`;
+  return `<p class="rv-verdict rv-judge-${esc(v.tone)}" role="status"><strong>${esc(v.verdict)}</strong></p>
+    <div class="rv-tiles"><div class="rv-tile"><span class="lbl">CHECKER SAID TAKE</span><strong class="mono">${esc(v.take.pnl)}</strong><small class="dim">${esc(v.take.text)}</small></div><div class="rv-tile"><span class="lbl">CHECKER SAID SKIP</span><strong class="mono">${esc(v.skip.pnl)}</strong><small class="dim">${esc(v.skip.text)}</small></div></div>
+    <ul class="rv-list rv-judge-notes">${[v.luck, v.filterText, v.calText, v.splitText, v.lateText].filter(Boolean).map((t) => `<li class="dim">${esc(t)}</li>`).join('')}</ul>`;
+}
+
 function lessonsHtml(rv) {
   const on = rv.useLessons === true;
   const list = rv.lessons.length ? `<ul class="rv-list">${rv.lessons.map((l) => `<li class="rv-less rv-less-${esc(l.kind)}">${esc(l.text)}</li>`).join('')}</ul>` : `<p class="dim">${rv.enough ? 'No lesson yet. No group is weak enough to rule out luck.' : `No lesson yet. The review needs ${rv.minTotal} or more outcomes.`}</p>`;
@@ -61,6 +71,7 @@ export function reviewHtml() {
     <p class="dim rv-note">${esc(rv.note)} ${rv.sample.outcomes} scored outcomes.</p>
     ${edgesHtml(rv)}
     <h3 class="rv-h">Ideas to test</h3>${ideasHtml()}
+    <h3 class="rv-h">Does the AI checker help?</h3>${checkerHtml(rv)}
     <h3 class="rv-h">Lessons for the trader</h3>${lessonsHtml(rv)}`;
 }
 

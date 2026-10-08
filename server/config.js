@@ -28,8 +28,9 @@ const envCred = {
   scannerModel: process.env.SCANNER_MODEL || 'deepseek/deepseek-v3.1-terminus',
   traderModel: process.env.TRADER_MODEL || 'deepseek/deepseek-chat-v3.1',
   newsModel: process.env.NEWS_MODEL || 'deepseek/deepseek-chat-v3.1', // the news & earnings bot (optional context stage of a run)
+  judgeModel: process.env.JUDGE_MODEL || '', // the AI checker (second opinion on a proposal). Empty = use the trader model
 };
-const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
+const acctCred = { alpacaKey: '', alpacaSecret: '', openrouterKey: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '', judgeModel: '' };
 const credListeners = new Set();
 let mockOverride = null; // test hook / explicit override; null = read USE_MOCK_DATA at call time
 
@@ -53,7 +54,7 @@ export function onCredentialsChange(fn) {
 }
 
 export const getAccountCredentials = () => ({ ...acctCred });
-export const getEnvDefaults = () => ({ scannerModel: envCred.scannerModel, traderModel: envCred.traderModel, newsModel: envCred.newsModel });
+export const getEnvDefaults = () => ({ scannerModel: envCred.scannerModel, traderModel: envCred.traderModel, newsModel: envCred.newsModel, judgeModel: envCred.judgeModel || envCred.traderModel });
 
 /** Where the active credential comes from: 'account' | 'env' | 'none'. */
 export function credentialSource() {
@@ -140,6 +141,13 @@ export const config = {
     },
     set newsModel(v) {
       envCred.newsModel = v;
+    },
+    /** The AI checker's model. Falls back to the trader model, so nothing new needs setting up. A different model gives a more independent opinion. */
+    get judgeModel() {
+      return acctCred.judgeModel || envCred.judgeModel || acctCred.traderModel || envCred.traderModel;
+    },
+    set judgeModel(v) {
+      envCred.judgeModel = v;
     },
   },
   finnhub: {

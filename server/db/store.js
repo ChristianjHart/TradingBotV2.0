@@ -65,6 +65,9 @@ const defaults = {
     botPersona: 'default',
     // Give the trader plain-fact lessons from this desk's own results (services/review.js). OFF by default.
     useLessons: false,
+    // AI checker (services/judge.js): how many times to ask, and whether to check every new proposal automatically. Auto is OFF (it spends budget).
+    judgeRuns: 3,
+    autoJudge: false,
   },
   worker: {
     status: 'online',

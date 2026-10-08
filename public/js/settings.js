@@ -10,7 +10,7 @@ import { mountSchedule } from './schedule.js';
 import { $, hooks, root, state } from './state.js';
 import { confirmDialog, toast } from './ui.js';
 
-const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge', schedule: 'sched-root', news: 'sec-news', persona: 'sec-persona' };
+const SECTION = { account: 'account-root', budget: 'sec-budget', models: 'models-root', auto: 'sec-auto', edge: 'sec-edge', schedule: 'sched-root', news: 'sec-news', persona: 'sec-persona', checker: 'sec-checker' };
 
 /** Scroll to the section named by `#settings/<section>` (once the page has been mounted). */
 export function applySettingsFocus() {
@@ -72,6 +72,47 @@ function wirePersona() {
       toast(`Could not save: ${er.message}`, 'error');
     } finally {
       host.querySelectorAll('[data-persona]').forEach((x) => (x.disabled = false));
+    }
+  });
+}
+
+function checkerCardHtml(s) {
+  const on = s.autoJudge === true;
+  const runs = s.judgeRuns ?? 3;
+  return `<section class="widget checker-card" id="sec-checker" aria-labelledby="h-checker"><h2 class="widget-title" id="h-checker">AI CHECKER</h2>
+    <p class="dim">A second AI gives an independent opinion on each pending proposal: is it worth taking, and how likely is a profit? It sees only the numbers, not the first AI’s confidence or reasoning. It asks several times so you can see how much the answers agree. It gives advice only. You still approve each trade.</p>
+    <div class="sw-row"><div class="sw-txt"><strong id="ck-l">Check every new proposal automatically</strong><p class="dim" id="ck-d">${on ? 'ON. Each run asks the checker about every new proposal. This uses AI budget.' : 'OFF (recommended). You press Ask the AI checker on the proposals you care about.'}</p></div>
+      <button type="button" class="switch" id="sw-checker" role="switch" aria-checked="${on}" aria-labelledby="ck-l" aria-describedby="ck-d"><span class="sw-knob" aria-hidden="true"></span><span class="sw-state">${on ? 'ON' : 'OFF'}</span></button></div>
+    <label class="ck-runs" for="ck-runs">Times to ask per proposal<select id="ck-runs">${[2, 3, 4, 5].map((n) => `<option value="${n}"${n === runs ? ' selected' : ''}>${n}</option>`).join('')}</select><span class="fld-hint">More times gives steadier stats and costs more. Each ask is a small call.</span></label>
+    <p class="dim">Pick the checker’s model in <a class="prop-link" href="#settings/models">Models</a>. A different model than the trader gives a more independent opinion.</p></section>`;
+}
+
+function wireChecker() {
+  const sw = $('sw-checker');
+  if (!sw) return;
+  sw.addEventListener('click', async () => {
+    const next = sw.getAttribute('aria-checked') !== 'true';
+    sw.disabled = true;
+    try {
+      await savePatch({ autoJudge: next });
+      sw.setAttribute('aria-checked', String(next));
+      sw.querySelector('.sw-state').textContent = next ? 'ON' : 'OFF';
+      $('ck-d').textContent = next ? 'ON. Each run asks the checker about every new proposal. This uses AI budget.' : 'OFF (recommended). You press Ask the AI checker on the proposals you care about.';
+      toast(next ? 'Auto-check is ON' : 'Auto-check is OFF', next ? 'warn' : 'success');
+      await refresh();
+    } catch (e) {
+      toast(`Could not save: ${e.message}`, 'error');
+    } finally {
+      sw.disabled = false;
+    }
+  });
+  $('ck-runs').addEventListener('change', async (e) => {
+    try {
+      await savePatch({ judgeRuns: Number(e.target.value) });
+      toast(`The checker will ask ${e.target.value} times per proposal.`, 'success');
+      await refresh();
+    } catch (er) {
+      toast(`Could not save: ${er.message}`, 'error');
     }
   });
 }
@@ -211,7 +252,7 @@ export function mountSettings() {
       ${state.auth.required && state.auth.mode !== 'session' ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
     </section></div>
     <div class="settings-grid">${newsCardHtml(s)}${edgeCardHtml(s)}</div>
-    <div class="settings-grid">${personaCardHtml(s)}</div>
+    <div class="settings-grid">${personaCardHtml(s)}${checkerCardHtml(s)}</div>
     <div class="settings-grid account-grid" id="account-root" aria-live="polite"></div></div>`;
   if (state.auth.mode !== 'token') mountAccount($('account-root'));
   mountSchedule($('sched-root')).then(applySettingsFocus);
@@ -221,6 +262,7 @@ export function mountSettings() {
   wireAuto();
   wireEdge();
   wirePersona();
+  wireChecker();
   patchBudgetCard();
   $('btn-auth2')?.addEventListener('click', authClick);
   applySettingsFocus();

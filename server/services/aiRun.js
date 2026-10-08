@@ -13,6 +13,7 @@ import { AiError, stageFor, isAiError } from './aiErrors.js';
 import { mockLlmEnabled } from './mockLlm.js';
 import { budgetStatus, estimateCallCostUsd } from './spend.js';
 import { setupOf } from './debate.js';
+import { judgeMany } from './judge.js';
 
 const log = (msg) => console.log(`[run] ${msg}`);
 
@@ -169,6 +170,8 @@ export function startAiRun({ trigger } = {}) {
         aiCalls: usage.calls,
       });
       store.setWorker({ ...store.getWorker(), lastScanAt: new Date().toISOString() });
+      // Optional (setting autoJudge, off by default): ask the AI checker about every new proposal, in the background.
+      if (store.getSettings().autoJudge === true && trades.proposals.length) judgeMany(trades.proposals.map((p) => p.id)).catch(() => {});
       log(`trader bot ${trades.source} → ${trades.proposalCount} proposals (${lap()})`);
       runState.stage = 'done';
     } catch (err) {

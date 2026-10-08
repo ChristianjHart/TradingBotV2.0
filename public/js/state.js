@@ -29,6 +29,9 @@ export const state = {
   why: {}, // proposal id -> true when its "Why this pick?" panel is open
   debateUi: {}, // proposal id -> { busy, error } for the bull/bear debate request
   debateLocal: {}, // proposal id -> debate just received (shown until the next poll carries it)
+  judgeUi: {}, // proposal id -> { busy, error } for the AI checker request
+  judgeLocal: {}, // proposal id -> check just received (shown until the next poll carries it)
+  judgeBatch: {}, // proposal id -> true while "Check all" has queued it
   propTab: 'pending',
   pendingBusy: {}, // proposal id -> 'approve' | 'reject'
   pendingMsg: {}, // proposal id -> {tone,title,message,actions} shown inline on the card

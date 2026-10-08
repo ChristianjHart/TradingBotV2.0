@@ -29,6 +29,7 @@ import { personaList } from '../services/personas.js';
 import { isAiError } from '../services/aiErrors.js';
 import { buildReview } from '../services/review.js';
 import { runExperiments } from '../services/experiments.js';
+import { judgeProposal, judgeMany, judgeScorecard, isJudging, unchecked, JUDGE } from '../services/judge.js';
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.use((req, res, next) => (req.method === 'GET' && !req.path.startsWith('/m
 const runLimit = rateLimit({ windowMs: 10 * 60_000, max: 10, name: 'run', refundWhen: (res) => res.statusCode === 200 });
 // The debate spends AI credits (cached results are free): tight window.
 const debateLimit = rateLimit({ windowMs: 10 * 60_000, max: 20, name: 'debate' });
+const judgeLimit = rateLimit({ windowMs: 10 * 60_000, max: 40, name: 'judge' });
 const AI_STATUS = { no_api_key: 409, budget_exhausted: 402, rate_limited: 429, model_unavailable: 502, invalid_output: 502, upstream_error: 502, timeout: 504 };
 
 /** JSON error with the error's own HTTP status when it has one, else `fallback`. */
@@ -130,7 +132,7 @@ router.get('/review', (_req, res) => {
   const positions = store.getPositions();
   const proposals = store.getProposals();
   const perf = computePerformance({ positions, snapshots: store.getEquity(), pickRecords: store.getPickScores(), proposals, settings: store.getSettings(), startingEquity: config.paperEquity });
-  res.json({ ...buildReview({ proposals, positions, startingEquity: config.paperEquity, baselines: perf.baselines }), useLessons: store.getSettings().useLessons === true });
+  res.json({ ...buildReview({ proposals, positions, startingEquity: config.paperEquity, baselines: perf.baselines }), useLessons: store.getSettings().useLessons === true, judge: judgeScorecard(proposals) });
 });
 // Replays past proposals under ready-made rule changes (fetches price history, so it is a separate call).
 router.get('/review/experiments', asyncHandler(async (_req, res) => res.json(await runExperiments())));
@@ -151,7 +153,7 @@ router.get('/mood', asyncHandler(async (_req, res) => res.json(await getMood()))
 router.get('/budget', (_req, res) => res.json(budgetStatus()));
 
 const truthy = (v) => /^(1|true|yes)$/i.test(String(v ?? ''));
-const BOT_MODEL = { scanner: () => config.openrouter.scannerModel, trader: () => config.openrouter.traderModel, news: () => config.openrouter.newsModel };
+const BOT_MODEL = { scanner: () => config.openrouter.scannerModel, trader: () => config.openrouter.traderModel, news: () => config.openrouter.newsModel, judge: () => config.openrouter.judgeModel };
 const MODEL_ID = /^[\w.\-:/]{1,100}$/;
 
 router.get('/models', asyncHandler(async (req, res) => {
@@ -165,7 +167,7 @@ router.get('/models', asyncHandler(async (req, res) => {
       fetchedAt: new Date(c.fetchedAt).toISOString(),
       stale: c.stale,
       ...(c.error ? { error: c.error } : {}),
-      selected: { scanner: BOT_MODEL.scanner(), trader: BOT_MODEL.trader(), news: BOT_MODEL.news() },
+      selected: { scanner: BOT_MODEL.scanner(), trader: BOT_MODEL.trader(), news: BOT_MODEL.news(), judge: BOT_MODEL.judge() },
       notes: FREE_MODEL_NOTES,
     });
   } catch (err) {
@@ -175,7 +177,7 @@ router.get('/models', asyncHandler(async (req, res) => {
 
 router.get('/models/estimate', asyncHandler(async (req, res) => {
   const bot = String(req.query.bot ?? '');
-  if (!Object.hasOwn(BOT_MODEL, bot)) return res.status(400).json({ error: "bot must be 'scanner', 'trader' or 'news'" });
+  if (!Object.hasOwn(BOT_MODEL, bot)) return res.status(400).json({ error: "bot must be 'scanner', 'trader', 'news' or 'judge'" });
   const model = req.query.model === undefined ? BOT_MODEL[bot]() : String(req.query.model);
   if (!MODEL_ID.test(model)) return res.status(400).json({ error: 'invalid model id' });
   await getCatalog().catch(() => null); // best effort; cached
@@ -240,11 +242,32 @@ async function proposalCall(res, fn) {
 router.get('/proposals', (req, res) => {
   const status = req.query.status === undefined ? '' : String(req.query.status);
   if (status && status !== 'all' && !STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}, all` });
-  res.json(listProposals({ status, limit: Number(req.query.limit) || 100 }));
+  const out = listProposals({ status, limit: Number(req.query.limit) || 100 });
+  res.json({ ...out, proposals: out.proposals.map((p) => (p.status === 'pending' && isJudging(p.id) ? { ...p, judging: true } : p)) });
 });
 router.post('/proposals/approve-all', asyncHandler(async (_req, res) => res.json(await approveAll({ by: 'user' }))));
 router.post('/proposals/:id/approve', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, () => approveProposal(req.params.id, { by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
 router.post('/proposals/:id/reject', asyncHandler((req, res) => (PROPOSAL_ID.test(req.params.id) ? proposalCall(res, async () => rejectProposal(req.params.id, { reason: req.body?.reason, by: 'user' })) : res.status(404).json({ error: 'proposal not found', code: 'not_found' }))));
+
+// AI checker: an independent second opinion, asked several times (see services/judge.js). Advice only: it never approves or rejects.
+router.post('/proposals/judge-all', judgeLimit, asyncHandler(async (req, res) => {
+  const ids = unchecked().slice(0, JUDGE.MAX_BATCH);
+  if (!ids.length) return res.json({ started: 0, ids: [] });
+  judgeMany(ids).catch(() => {}); // runs in the background; the dashboard polls for results
+  res.status(202).json({ started: ids.length, ids });
+}));
+router.post('/proposals/:id/judge', judgeLimit, asyncHandler(async (req, res) => {
+  if (!PROPOSAL_ID.test(req.params.id)) return res.status(404).json({ error: 'proposal not found', code: 'not_found' });
+  const runs = req.query.runs === undefined ? undefined : Number(req.query.runs);
+  if (runs !== undefined && !(Number.isInteger(runs) && runs >= JUDGE.RUNS_MIN && runs <= JUDGE.RUNS_MAX)) return res.status(400).json({ error: `runs must be a whole number from ${JUDGE.RUNS_MIN} to ${JUDGE.RUNS_MAX}`, code: 'invalid_runs' });
+  try {
+    res.json(await judgeProposal(req.params.id, { runs, force: wantsForce(req) }));
+  } catch (err) {
+    if (isAiError(err)) return res.status(AI_STATUS[err.code] ?? 502).json({ error: err.message, code: err.code });
+    sendError(res, err);
+  }
+}));
+router.get('/judge/scorecard', (_req, res) => res.json(judgeScorecard(store.getProposals())));
 
 // Bull-vs-bear debate for one proposal: ONE AI call, cached on the proposal (re-run with ?force=1), budget-governed, no fallback.
 router.post('/proposals/:id/debate', debateLimit, asyncHandler(async (req, res) => {

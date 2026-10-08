@@ -12,12 +12,13 @@ const FIELDS = ['openrouterKey', 'alpacaKey', 'alpacaSecret', 'finnhubKey'];
 /** Decrypt the owner's stored keys/models and make them the active credentials (env vars remain the fallback). */
 export function applyOwnerCredentials() {
   const owner = usersRepo.owner();
-  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '' };
+  const next = { openrouterKey: '', alpacaKey: '', alpacaSecret: '', finnhubKey: '', scannerModel: '', traderModel: '', newsModel: '', judgeModel: '' };
   state.unreadable = false;
   if (owner) {
     next.scannerModel = owner.models?.scannerModel || '';
     next.traderModel = owner.models?.traderModel || '';
     next.newsModel = owner.models?.newsModel || '';
+    next.judgeModel = owner.models?.judgeModel || '';
     for (const f of FIELDS) {
       const blob = owner.keys_enc?.[f];
       if (!blob) continue;
@@ -51,7 +52,7 @@ export function accountSummary(user) {
       finnhub: { set: src.finnhub !== 'none', source: src.finnhub, last4: last4(c.finnhub.key) },
       alpaca: { set: src.alpaca !== 'none', source: src.alpaca, keyLast4: last4(c.alpaca.key), secretSet: Boolean(c.alpaca.secret) },
     },
-    models: { scanner: c.openrouter.scannerModel, trader: c.openrouter.traderModel, news: c.openrouter.newsModel, defaults: { scanner: defaults.scannerModel, trader: defaults.traderModel, news: defaults.newsModel } },
+    models: { scanner: c.openrouter.scannerModel, trader: c.openrouter.traderModel, news: c.openrouter.newsModel, judge: c.openrouter.judgeModel, defaults: { scanner: defaults.scannerModel, trader: defaults.traderModel, news: defaults.newsModel, judge: defaults.judgeModel } },
     encryptionReady: encryptionReady(),
     signupOpen: signupState().policyOpen,
     ...(state.unreadable ? { keysUnreadable: true } : {}),
@@ -105,7 +106,7 @@ export async function saveKeys(body) {
 const MODEL_RE = /^[\w.\-:/]{1,100}$/;
 
 /**
- * Body: {scannerModel?, traderModel?, newsModel?} ('' resets to the env default). Ids are validated by regex and, when the model
+ * Body: {scannerModel?, traderModel?, newsModel?, judgeModel?} ('' resets to the env default). Ids are validated by regex and, when the model
  * catalog is already loaded, against it: an unknown id is ALLOWED but reported in `warnings`. `notes` carry the free-model caveats.
  */
 export async function saveModels(body) {
@@ -116,7 +117,7 @@ export async function saveModels(body) {
   const warnings = [];
   const notes = [];
   const catalog = peekCatalog();
-  for (const field of ['scannerModel', 'traderModel', 'newsModel']) {
+  for (const field of ['scannerModel', 'traderModel', 'newsModel', 'judgeModel']) {
     if (body[field] === undefined) continue;
     const v = typeof body[field] === 'string' ? body[field].trim() : null;
     if (v === null || (v !== '' && !MODEL_RE.test(v))) return { status: 400, error: `${field} must match [A-Za-z0-9_.-:/] (max 100 chars)` };
@@ -128,7 +129,7 @@ export async function saveModels(body) {
     } else delete models[field]; // empty = back to the env/default model
   }
   await usersRepo.update(owner.id, { models: Object.keys(models).length ? models : null });
-  applyCredentials({ scannerModel: models.scannerModel || '', traderModel: models.traderModel || '', newsModel: models.newsModel || '' });
+  applyCredentials({ scannerModel: models.scannerModel || '', traderModel: models.traderModel || '', newsModel: models.newsModel || '', judgeModel: models.judgeModel || '' });
   store.addLog({ level: 'info', message: 'account model names updated' });
   return { ok: true, warnings, notes: [...new Set(notes)] };
 }

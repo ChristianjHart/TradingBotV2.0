@@ -2372,3 +2372,39 @@ details.pc-risk > summary:focus-visible { outline: 2px solid #60a5fa; outline-of
 .rv-err { color: var(--red-text); font-size: 13px; }
 .rv-sw { margin-top: 10px; }
 @media (max-width: 900px) { .rv-table th, .rv-table td { font-size: 13px; } }
+
+/* ---- AI checker ---- */
+.prop-bulk { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.prop-bulk .btn-ghost { min-height: 32px; }
+.pc-judge { display: grid; gap: 4px; padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--border); font-size: 13px; }
+.pc-judge .lbl { font-size: 11px; letter-spacing: .06em; color: var(--text-dim); }
+.pc-judge-good { border: 1px solid rgba(34,197,94,.45); background: var(--green-soft); }
+.pc-judge-bad { border: 1px solid rgba(248,113,113,.5); background: var(--red-soft); }
+.pc-judge-warn { border: 1px solid rgba(234,179,8,.45); background: rgba(234,179,8,.08); }
+.pc-judge-busy { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.pcj-btn { justify-self: start; }
+.pcj-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.pcj-call { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); }
+.pcj-good { color: var(--green-text); border-color: rgba(34,197,94,.6); }
+.pcj-bad { color: var(--red-text); border-color: rgba(248,113,113,.6); }
+.pcj-warn { color: #facc15; border-color: rgba(234,179,8,.6); }
+.pcj-meta, .pcj-note, .pc-judge small { font-size: 12px; }
+.pcj-notes { list-style: none; display: grid; gap: 2px; font-size: 12px; color: #fbbf24; }
+.pcj-notes li::before { content: "⚠ "; }
+.pcj-det > summary { min-height: 32px; display: flex; align-items: center; cursor: pointer; color: #93c5fd; font-size: 12px; }
+.pcj-runs { list-style: none; display: grid; gap: 4px; margin: 4px 0; }
+.pcj-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.pcj-err { color: var(--red-text); font-size: 12px; }
+.ck-runs { display: grid; gap: 4px; margin: 10px 0; max-width: 320px; font-size: 13px; color: var(--text-muted); }
+.ck-runs select { min-height: 40px; background: var(--bg-panel-2); color: var(--text); border: 1px solid var(--ctrl-border); border-radius: 6px; padding: 0 8px; font-size: 14px; }
+.rv-judge-good { background: var(--green-soft); border-color: rgba(34,197,94,.45); color: var(--green-text); }
+.rv-judge-bad { background: var(--red-soft); border-color: rgba(248,113,113,.5); color: var(--red-text); }
+.rv-judge-warn { background: rgba(234,179,8,.1); border-color: rgba(234,179,8,.45); color: #facc15; }
+.rv-judge-notes { margin-top: 8px; }
+@media (max-width: 900px) {
+  .pcj-det > summary, .pcj-btn, .prop-bulk .btn-ghost { min-height: 44px; }
+  .ck-runs select { min-height: 44px; font-size: 16px; }
+  .pc-judge { font-size: 13px; }
+}
+/* checker card sits on a tinted background: use the brighter muted text so small copy keeps 4.5:1 contrast */
+.pc-judge .lbl, .pc-judge .dim, .pcj-meta { color: var(--text-muted); }

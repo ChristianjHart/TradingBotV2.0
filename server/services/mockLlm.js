@@ -1,3 +1,4 @@
+// NOTE: text that passes through cleanText() must not contain "DATA:" (the sanitizer strips it as a data: URL), so those demo strings use "DEMO DATA - ".
 // DEV / TEST FIXTURE ONLY. MOCK_LLM=true swaps the OpenRouter call for a deterministic canned reply so screenshots and tests
 // run with no key. It is NOT a fallback for a missing AI: it is never used automatically, is refused (ignored + loud warning) in production
 // (NODE_ENV=production or RENDER), and everything it produces is labelled source:'demo' / model:'mock-llm'.
@@ -72,14 +73,26 @@ function traderReply(input) {
   return { summary: 'DEMO DATA: the mock LLM proposed the top candidates. This is a test fixture, not a real analysis.', trades };
 }
 
+/** Demo checker: a deterministic reply that varies with the sample number, so the demo shows agreement and spread. */
+function judgeReply(input) {
+  const t = input?.trade || {};
+  const be = Number(t.breakEvenWinRate) || 0.36;
+  let h = 0;
+  for (const ch of String(t.symbol)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const s = Number(input?.sample) || 0;
+  // a steady view per symbol (-8 to +12 points around break-even) plus a different wobble per sample (-9 to +9 points)
+  const p = Math.min(0.9, Math.max(0.1, be + ((h % 21) - 8) / 100 + (((s * 37 + h) % 19) - 9) / 100));
+  return { verdict: p >= be + 0.03 ? 'take' : 'skip', pProfit: +p.toFixed(2), keyRisk: 'DEMO DATA - canned risk note', reason: 'DEMO DATA - canned checker reply from the mock LLM (not a real analysis)' };
+}
+
 function debateReply(input) {
   const p = input?.proposal || {};
   const v = isPersonaId(input?.voice) ? PERSONAS[input.voice].demo : 'canned debate from the mock LLM';
   const lean = Number(p.confidence) >= 0.7 ? 'for' : Number(p.confidence) <= 0.55 ? 'against' : 'even';
   return {
-    forTrade: { thesis: `DEMO DATA: ${v}. The case FOR ${p.side || 'the trade'} ${p.symbol || ''}.`, points: ['DEMO DATA: canned supporting point (not a real analysis)', `Reward-to-risk is ${p.rewardToRisk ?? 'unknown'}`] },
-    againstTrade: { thesis: 'DEMO DATA: the case AGAINST the trade (canned).', points: ['DEMO DATA: canned counter-point (not a real analysis)'] },
-    verdict: { lean, note: 'DEMO DATA: canned moderator note from the mock LLM.' },
+    forTrade: { thesis: `DEMO DATA - ${v}. The case FOR ${p.side || 'the trade'} ${p.symbol || ''}.`, points: ['DEMO DATA - canned supporting point (not a real analysis)', `Reward-to-risk is ${p.rewardToRisk ?? 'unknown'}`] },
+    againstTrade: { thesis: 'DEMO DATA - the case AGAINST the trade (canned).', points: ['DEMO DATA - canned counter-point (not a real analysis)'] },
+    verdict: { lean, note: 'DEMO DATA - canned moderator note from the mock LLM.' },
   };
 }
 
@@ -95,10 +108,10 @@ function newsReply(input) {
     return {
       symbol: x.symbol,
       sentiment: rnd2(((h % 21) - 10) / 10),
-      catalyst: 'DEMO DATA: canned catalyst from the mock LLM',
+      catalyst: 'DEMO DATA - canned catalyst from the mock LLM',
       earningsInDays: days,
       riskFlags: (days !== null && days <= 2) || i === flagAt ? ['earnings_imminent'] : [],
-      summary: 'DEMO DATA: canned news summary from the mock LLM (not a real analysis)',
+      summary: 'DEMO DATA - canned news summary from the mock LLM (not a real analysis)',
       sources: first ? [{ id: first.id }] : [],
     };
   });
@@ -113,7 +126,7 @@ export function mockChat({ bot, user }) {
   } catch {
     /* canned reply with empty input */
   }
-  const out = input?.task === 'bull_bear_debate' ? debateReply(input) : bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : bot === 'news' ? newsReply(input) : { items: [] };
+  const out = input?.task === 'trade_check' ? judgeReply(input) : input?.task === 'bull_bear_debate' ? debateReply(input) : bot === 'scanner' ? scannerReply(input) : bot === 'trader' ? traderReply(input) : bot === 'news' ? newsReply(input) : { items: [] };
   const content = JSON.stringify(out);
   return { content, usage: { prompt_tokens: Math.ceil(String(user).length / 4), completion_tokens: Math.ceil(content.length / 4), cost: 0 } };
 }
