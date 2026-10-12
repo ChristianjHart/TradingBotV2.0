@@ -103,7 +103,7 @@ function networkError(err) {
  * cost accounting (ledger + ai_logs.usage). Returns { content, usage:{promptTokens,completionTokens,costUsd,costSource} }.
  * Throws AiError. The estimate is checked BEFORE any request is sent.
  */
-async function callOnce({ bot, model, messages, maxTokens, timeoutMs, runId, kind }) {
+async function callOnce({ bot, model, messages, maxTokens, timeoutMs, runId, kind, temperature = 0.2 }) {
   const promptChars = messages.reduce((s, m) => s + String(m.content).length, 0);
 
   if (mockLlmEnabled()) {
@@ -121,7 +121,7 @@ async function callOnce({ bot, model, messages, maxTokens, timeoutMs, runId, kin
   const finish = () => insert('ai_logs', { ...log, duration_ms: Date.now() - started });
   try {
     for (;;) {
-      const body = { model, temperature: 0.2, max_tokens: maxTokens, messages, usage: { include: true } };
+      const body = { model, temperature, max_tokens: maxTokens, messages, usage: { include: true } };
       if (useJson) body.response_format = { type: 'json_object' };
       let res;
       let text;
@@ -200,9 +200,10 @@ const REPAIR = (why) =>
  * (no_api_key, budget_exhausted, rate_limited, model_unavailable, invalid_output, upstream_error, timeout).
  * `validate(json)` (optional) must return the cleaned value or throw; unusable output gets exactly ONE repair retry (billed and
  * ledgered like any call), after which the call fails with invalid_output.
+ * `temperature` defaults to 0.2 (steady answers); the AI checker raises it so repeated runs can differ.
  * Returns { json, value, usage:{promptTokens,completionTokens,costUsd,costSource,calls}, model, repaired, mock }.
  */
-export async function chatJson({ bot = 'other', model, system, user, maxTokens = 8000, timeoutMs = 170_000, runId = null, validate }) {
+export async function chatJson({ bot = 'other', model, system, user, maxTokens = 8000, timeoutMs = 170_000, runId = null, validate, temperature = 0.2 }) {
   const mock = mockLlmEnabled();
   if (!mock && !hasOpenRouterKey()) throw new AiError('no_api_key', 'OpenRouter key not set (add it under Settings → Account or set OPENROUTER_API_KEY). The AI cannot run without it and nothing is traded.');
   if (!mock) await getCatalog().catch(() => null); // best effort: pricing + json-mode support (cached 1h)
@@ -224,7 +225,7 @@ export async function chatJson({ bot = 'other', model, system, user, maxTokens =
     return { json, value: validate ? validate(json) : json };
   };
 
-  const first = await callOnce({ bot, model: usedModel, messages, maxTokens, timeoutMs, runId, kind: 'first' });
+  const first = await callOnce({ bot, model: usedModel, messages, maxTokens, timeoutMs, runId, kind: 'first', temperature });
   add(first.usage);
   try {
     const out = parse(first.content);
@@ -232,7 +233,7 @@ export async function chatJson({ bot = 'other', model, system, user, maxTokens =
   } catch (err) {
     const why = err.message;
     const repairMessages = [...messages, { role: 'assistant', content: String(first.content || '(empty reply)').slice(0, 6000) }, { role: 'user', content: REPAIR(why) }];
-    const second = await callOnce({ bot, model: usedModel, messages: repairMessages, maxTokens, timeoutMs, runId, kind: 'repair' });
+    const second = await callOnce({ bot, model: usedModel, messages: repairMessages, maxTokens, timeoutMs, runId, kind: 'repair', temperature });
     add(second.usage);
     try {
       const out = parse(second.content);

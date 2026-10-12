@@ -22,12 +22,18 @@ export const state = {
   history: null, // {proposals:[decided…], counts} (loaded lazily when the History tab is open)
   budget: null, // full /api/budget
   gamify: null, // /api/gamify: streaks + badges
+  review: null, // /api/review: loss review
   totw: null, // /api/trade-of-the-week
   calendar: null, // /api/calendar
   mood: null, // /api/mood
   why: {}, // proposal id -> true when its "Why this pick?" panel is open
   debateUi: {}, // proposal id -> { busy, error } for the bull/bear debate request
   debateLocal: {}, // proposal id -> debate just received (shown until the next poll carries it)
+  judgeUi: {}, // proposal id -> { busy, error } for the AI checker request
+  kronosUi: {}, // proposal id -> { busy, error } for the Kronos forecast request
+  kronosLocal: {}, // proposal id -> forecast just received
+  judgeLocal: {}, // proposal id -> check just received (shown until the next poll carries it)
+  judgeBatch: {}, // proposal id -> true while "Check all" has queued it
   propTab: 'pending',
   pendingBusy: {}, // proposal id -> 'approve' | 'reject'
   pendingMsg: {}, // proposal id -> {tone,title,message,actions} shown inline on the card

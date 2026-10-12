@@ -293,9 +293,9 @@ export function budgetView(b) {
   const pct = num(b.pct) ?? (cap > 0 ? (spent / cap) * 100 : spent > 0 ? 100 : 0);
   const level = b.level === 'ok' || b.level === 'warn' || b.level === 'blocked' ? b.level : budgetLevel(pct);
   const projected = num(b.projectedMonthEndUsd);
-  const bots = ['scanner', 'trader', 'news', 'other']
+  const bots = ['scanner', 'trader', 'news', 'judge', 'other']
     .filter((k) => b.byBot?.[k])
-    .map((k) => ({ id: k, label: k[0].toUpperCase() + k.slice(1), usd: num(b.byBot[k].usd) ?? 0, calls: num(b.byBot[k].calls) ?? 0 }));
+    .map((k) => ({ id: k, label: k === 'judge' ? 'Checker' : k[0].toUpperCase() + k.slice(1), usd: num(b.byBot[k].usd) ?? 0, calls: num(b.byBot[k].calls) ?? 0 }));
   const days = Array.isArray(b.last7d) ? b.last7d : [];
   const maxDay = Math.max(0, ...days.map((d) => num(d.usd) ?? 0));
   const bars = days.map((d) => {

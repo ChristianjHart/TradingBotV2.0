@@ -63,6 +63,12 @@ const defaults = {
     netEdgeAvoidedWeight: 1,
     // Cosmetic voice of the trader bot's text (see services/personas.js). Never changes numbers or rules.
     botPersona: 'default',
+    // Give the trader plain-fact lessons from this desk's own results (services/review.js). OFF by default.
+    useLessons: false,
+    // AI checker (services/judge.js): how many times to ask, and whether to check every new proposal automatically. Auto is OFF (it spends budget).
+    judgeRuns: 3,
+    autoJudge: false,
+    autoForecast: false,
   },
   worker: {
     status: 'online',

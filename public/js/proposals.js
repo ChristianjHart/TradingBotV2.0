@@ -7,6 +7,8 @@ import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
 import { autoRejectText } from './news-logic.js';
 import { handleWhyAct, personaBadge, whyHtml, whySig } from './explain.js';
+import { askKronos, kronosRowHtml, kronosSig } from './kronos.js';
+import { askChecker, checkAll, checkAllLabel, judgeRowHtml, judgeSig } from './judge.js';
 
 /* ---------- selectors over state ---------- */
 
@@ -85,6 +87,8 @@ export function cardHtml(v, busy, msg, p = null) {
     <div class="rbar pc-bar" role="img" aria-label="${esc(barLabel)}" style="background:${bar}"><span class="rentry" style="left:${v.entryAt * 100}%"></span></div>
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
     ${newsCtxHtml(v.news)}
+    ${p ? judgeRowHtml(p) : ''}
+    ${p ? kronosRowHtml(p) : ''}
     ${p ? whyHtml(p) : ''}
     ${riskHtml(v)}
     ${p ? (personaBadge(p) ? `<p class="pc-src dim">${personaBadge(p)}</p>` : '') : `<p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>`}
@@ -98,7 +102,7 @@ export function cardHtml(v, busy, msg, p = null) {
 
 /** Signature of everything a card shows except the ticking countdown text, so live polls only touch cards that changed. */
 function sigOf(v, busy, msg, p = null) {
-  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '']);
+  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '', p ? judgeSig(p) : '', p ? kronosSig(p) : '']);
 }
 
 /** Keyed reconcile: keep untouched card nodes (scroll, expanded text, focus) and replace only the changed ones. */
@@ -145,7 +149,7 @@ export function proposalsShellHtml() {
         <button class="tab active" role="tab" id="ptab-pending" data-ptab="pending" aria-controls="prop-pending" aria-selected="true" type="button">Pending <span class="tab-n" id="ptab-n"></span></button>
         <button class="tab" role="tab" id="ptab-history" data-ptab="history" aria-controls="prop-history" aria-selected="false" tabindex="-1" type="button">History</button>
       </div>
-      <button class="btn-accent btn-approve-all" id="btn-approve-all" type="button" hidden>Approve all</button>
+      <div class="prop-bulk"><button class="btn-ghost" id="btn-check-all" type="button" hidden>Check all</button><button class="btn-accent btn-approve-all" id="btn-approve-all" type="button" hidden>Approve all</button></div>
     </div>
     <div id="prop-note"></div>
     <div id="prop-pending" class="prop-list" role="tabpanel" aria-labelledby="ptab-pending"></div>
@@ -205,6 +209,12 @@ function patchToolbar() {
     b.hidden = !show;
     const busy = b.dataset.busy === '1';
     if (!busy) setText(b, `Approve all (${list.length})`);
+  }
+  const ca = $('btn-check-all');
+  if (ca) {
+    const c = checkAllLabel();
+    ca.hidden = !(state.propTab === 'pending' && c.show);
+    setText(ca, c.text);
   }
   setText($('prop-sub'), state.status?.settings?.autoApprove ? 'Auto-approve is ON' : '');
 }
@@ -430,6 +440,18 @@ function onPendingClick(e) {
     case 'jump':
       jumpTo(b.dataset.target || 'pos-open');
       break;
+    case 'judge':
+    case 'judge-redo': {
+      const p = pendingList().find((x) => String(x.id) === id);
+      if (p) askChecker(p, b.dataset.act === 'judge-redo', patchProposals);
+      break;
+    }
+    case 'forecast':
+    case 'forecast-redo': {
+      const p = pendingList().find((x) => String(x.id) === id);
+      if (p) askKronos(p, b.dataset.act === 'forecast-redo', patchProposals);
+      break;
+    }
     case 'why':
     case 'debate':
     case 'debate-redo': {
@@ -529,6 +551,7 @@ export function bindProposals() {
   if (!sec) return;
   $('prop-pending').addEventListener('click', onPendingClick);
   $('btn-approve-all').addEventListener('click', approveAll);
+  $('btn-check-all').addEventListener('click', checkAll);
   sec.querySelector('[role=tablist]').addEventListener('click', (e) => {
     const b = e.target.closest('[data-ptab]');
     if (b) setPropTab(b.dataset.ptab);

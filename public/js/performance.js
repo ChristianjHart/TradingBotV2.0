@@ -71,6 +71,7 @@ export function patchPerf() {
   }
   const wr = pctOf(p.winRate);
   const dd = p.maxDrawdownPct;
+  const pa = p.pickAccuracy;
   setHtml(
     stats,
     [
@@ -78,6 +79,7 @@ export function patchPerf() {
       statCard('AVG R', p.avgR != null ? `${Number(p.avgR).toFixed(2)}R` : '—', clsPos(p.avgR), 'per closed trade'),
       statCard('MAX DRAWDOWN', dd != null ? `${Math.abs(dd).toFixed(2)}%` : '—', dd ? 'neg' : '', p.maxDrawdownUsd != null ? fmtMoney(p.maxDrawdownUsd, 0) : ''),
       statCard('REALIZED P&amp;L', fmtMoney(p.realizedPnl, 0), clsPos(p.realizedPnl)),
+      statCard('PICK ACCURACY', pa && pa.total ? `${((pa.hits / pa.total) * 100).toFixed(0)}%` : '—', '', pa && pa.total ? `${pa.hits} of ${pa.total} picks right` : 'no scored picks'),
     ].join('') + ((p.closed ?? 0) < 20 ? `<div class="warn-note wide">${closedNote(p.closed ?? 0)}</div>` : ''),
   );
   if (!charts.equity) charts.equity = new LineChart($('equity-chart'), { summaryEl: $('equity-sum'), tableEl: $('equity-table'), format: (v) => fmtMoney(v, 0), title: 'Equity curve', yLabel: 'Equity (USD)', minRangePct: 0.5 });

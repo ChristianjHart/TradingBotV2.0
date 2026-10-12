@@ -13,6 +13,7 @@ import { patchScheduleWidget, scheduleSectionSummary } from './schedule.js';
 import { gamifySectionSummary, patchGamify } from './gamify.js';
 import { bindTotw, patchTotw } from './highlights.js';
 import { bindCalendar, calendarSectionSummary, patchCalendar } from './calendar.js';
+import { bindReview, patchReview, reviewSectionSummary } from './review.js';
 import { newsRunStatus } from './news-logic.js';
 import { $, savePrefs, empty, pctOf, root, setCls, setHtml, setText, skeleton, state } from './state.js';
 
@@ -67,27 +68,6 @@ export function allocationHtml() {
   return `<div class="alloc-wrap">
     <div class="donut" role="img" aria-label="Allocation: ${esc(text)}" style="background:${donutGradient(parts)}"><div class="donut-hole"></div></div>
     <div class="legend">${parts.map((a) => `<div class="legend-row"><span class="swatch" style="background:${a.color}"></span><span>${a.label}</span><span class="muted mono">${total > 1 ? fmtMoney(a.value, 0) : ''}</span></div>`).join('')}</div></div>`;
-}
-
-export function accuracyHtml() {
-  if (!state.loaded) return skeleton(3);
-  const acct = state.positions?.account;
-  const p = state.perf;
-  const closed = p?.closed ?? acct?.closedCount ?? 0;
-  const wins = p?.wins ?? acct?.wins ?? 0;
-  const wr = p?.winRate != null ? pctOf(p.winRate) : closed ? (wins / closed) * 100 : null;
-  const small = closed < 20;
-  const pa = p?.pickAccuracy;
-  return `
-    <div class="big-num">${wr == null ? '—' : `${wr.toFixed(0)}%`}</div>
-    <div class="sub-num">${closed ? `${wins} wins / ${closed} closed trades` : 'no closed trades yet'}</div>
-    ${closed && small ? `<div class="warn-note">Only ${closed} trade${closed === 1 ? '' : 's'}. Too few to trust.</div>` : ''}
-    <div class="perf-grid">
-      <div class="perf-stat"><span class="lbl">EQUITY</span><strong>${fmtMoney(acct?.equity, 0)}</strong></div>
-      <div class="perf-stat"><span class="lbl">REALIZED P&amp;L</span><strong class="${clsPos(acct?.realizedPnl)}">${fmtMoney(acct?.realizedPnl, 0)}</strong></div>
-      <div class="perf-stat"><span class="lbl">OPEN P&amp;L</span><strong class="${clsPos(acct?.unrealizedPnl)}">${fmtMoney(acct?.unrealizedPnl, 0)}</strong></div>
-      <div class="perf-stat"><span class="lbl">PICK ACCURACY</span><strong>${pa && pa.total ? `${((pa.hits / pa.total) * 100).toFixed(0)}% (${pa.hits}/${pa.total})` : '—'}</strong></div>
-    </div>`;
 }
 
 export function bannersHtml() {
@@ -153,7 +133,6 @@ export function mountDashboard() {
       <section class="widget ai-summary" aria-labelledby="h-sum" id="dsec-sum" data-dsec="sum">${sectionHeadHtml('sum')}<h2 class="widget-title" id="h-sum">AI SUMMARY</h2><div id="w-summary"></div></section>
       <section class="widget budget-box" aria-labelledby="h-budget-w" id="sec-budget-w" data-dsec="budget">${sectionHeadHtml('budget')}<h2 class="widget-title" id="h-budget-w">AI BUDGET</h2><div id="w-budget"></div></section>
       <section class="widget allocation-box" aria-labelledby="h-alloc" id="dsec-alloc" data-dsec="alloc">${sectionHeadHtml('alloc')}<h2 class="widget-title" id="h-alloc">ALLOCATION</h2><div id="w-alloc"></div></section>
-      <section class="widget model-acc" aria-labelledby="h-acc" id="dsec-acc" data-dsec="acc">${sectionHeadHtml('acc')}<h2 class="widget-title" id="h-acc">MODEL ACCURACY</h2><div id="w-acc"></div></section>
     </div>
     <div class="run-status dim" id="sys-strip"></div>
     <div class="grid grid-ai">
@@ -183,6 +162,7 @@ export function mountDashboard() {
         </div>
       </section>
     </div>
+    <section class="widget review-card" aria-labelledby="h-review" id="dsec-review" data-dsec="review">${sectionHeadHtml('review')}<h2 class="widget-title" id="h-review"><span>LOSS REVIEW</span></h2><div id="w-review"></div></section>
     <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf', { href: '#performance', label: 'Details' })}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span></h2>${perfShellHtml({ compact: true })}</section>
   </div>`;
   bindSections(root);
@@ -196,6 +176,7 @@ export function mountDashboard() {
   bindNews();
   bindTotw();
   bindCalendar();
+  bindReview();
   const pw = $('pos-open').parentElement;
   pw.addEventListener('click', posClick);
   pw.addEventListener('change', posChange);
@@ -229,7 +210,7 @@ export function patchDashboard() {
   patchGamify();
   patchTotw();
   patchCalendar();
-  setHtml($('w-acc'), accuracyHtml());
+  patchReview();
   setHtml($('sys-strip'), sysStripHtml());
   const st = state.picks;
   setText($('picks-title'), `SCANNER TOP ${st?.picks?.length || 100} PICKS`);
@@ -260,13 +241,13 @@ function sectionData() {
     sum: { proposalCount: state.summary?.at ? state.summary.proposalCount ?? state.summary.proposals?.length ?? 0 : null },
     news: { text: newsSectionSummary() },
     sched: { text: scheduleSectionSummary() },
+    review: { text: reviewSectionSummary() },
     fun: { text: gamifySectionSummary() },
     totw: { text: state.totw?.trade ? `${state.totw.trade.symbol} ${state.totw.trade.pnl >= 0 ? '+' : '-'}$${Math.abs(Math.round(state.totw.trade.pnl))}` : 'none yet' },
     cal: { text: calendarSectionSummary() },
     budget: { spentText: bv?.spentText, capText: bv?.capText },
     picks: { picksCount: state.loaded ? state.picks?.picks?.length || 0 : null },
     perf: { netEdge: p?.netEdge == null ? NaN : Number(p.netEdge), closed },
-    acc: { closed, winRatePct: p?.winRate != null ? pctOf(p.winRate) : closed ? (wins / closed) * 100 : 0 },
     alloc: { cashPct: equity > 0 && Number.isFinite(cash) ? (Math.max(0, cash) / equity) * 100 : NaN },
   };
 }

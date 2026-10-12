@@ -34,7 +34,7 @@ const debounce = (fn, ms) => (...a) => {
 function syncSelection() {
   const am = state.account?.models;
   const s = M.res?.selected || {};
-  M.sel = { scanner: am?.scanner || s.scanner || '', trader: am?.trader || s.trader || '', news: am?.news || s.news || '' };
+  M.sel = { scanner: am?.scanner || s.scanner || '', trader: am?.trader || s.trader || '', news: am?.news || s.news || '', judge: am?.judge || s.judge || '' };
   M.defaults = am?.defaults || {};
 }
 

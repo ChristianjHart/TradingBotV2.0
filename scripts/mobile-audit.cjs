@@ -821,7 +821,9 @@ async function main() {
           const h = await pg.evaluate(() => document.documentElement.scrollHeight);
           // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more.
           // 3900 = the old 3600 + the market-mood bar and the three collapsed fun sections (achievements, trade of the week, calendar).
-          if (h > 3900) out.push(`collapsed dashboard is ${h}px tall (budget 3900 with extreme stub content)`);
+          // 4400 = 3900 + one 44px "Ask the AI checker" button row per pending proposal card (stub data has several) and the "Check all" button.
+          // 4800 = 4400 + one more button row per pending card when a forecast service is set up (this audit runs with KRONOS_URL on).
+          if (h > 4800) out.push(`collapsed dashboard is ${h}px tall (budget 4800 with extreme stub content)`);
           const r = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].map((w) => [w.dataset.dsec, w.querySelector('[data-dsec-toggle]').getAttribute('aria-expanded'), w.querySelector('[data-dsec-toggle]').getBoundingClientRect().height]));
           const open = r.filter((x) => x[1] === 'true').map((x) => x[0]);
           if (open.join() !== 'pos') out.push(`expected only positions open, got ${open.join() || 'none'}`);

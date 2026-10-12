@@ -8,6 +8,7 @@ export const BOTS = [
   { id: 'scanner', label: 'Scanner', field: 'scannerModel', hint: 'ranks the top picks' },
   { id: 'trader', label: 'Trader', field: 'traderModel', hint: 'proposes the trades' },
   { id: 'news', label: 'News', field: 'newsModel', hint: 'headlines and earnings notes' },
+  { id: 'judge', label: 'Checker', field: 'judgeModel', hint: 'a second opinion on each trade' },
 ];
 
 export const FREE_NOTES = [

@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { AiError } from './aiErrors.js';
 import { catalogEntry } from './catalog.js';
 
-export const BOTS = ['scanner', 'trader', 'news', 'other'];
+export const BOTS = ['scanner', 'trader', 'news', 'judge', 'other'];
 export const WARN_PCT = 70;
 
 /** Typical tokens per call when nothing has been measured yet. */
@@ -15,6 +15,7 @@ export const DEFAULT_TOKENS = {
   scanner: { prompt: 6000, completion: 4000 },
   trader: { prompt: 3000, completion: 1000 },
   news: { prompt: 4000, completion: 1000 },
+  judge: { prompt: 900, completion: 150 }, // one small call per sample
   other: { prompt: 2000, completion: 500 },
 };
 /** Conservative price (USD per 1M tokens) used to ESTIMATE when a model is not in the catalog (never used for reported costs). */
