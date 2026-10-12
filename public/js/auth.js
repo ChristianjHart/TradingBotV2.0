@@ -4,6 +4,7 @@ import { barsCache, destroyCharts, root, state } from './state.js';
 import { resetWhatif } from './whatif.js';
 import { resetReview } from './review.js';
 import { resetJudge } from './judge.js';
+import { resetKronos } from './kronos.js';
 import { toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +57,7 @@ export function lock(reason = '') {
   // wipe private state + rendered DOM
   Object.assign(state, { loaded: false, loadError: null, status: null, dashboard: null, picks: null, positions: null, summary: null, perf: null, runs: null, logs: null, run: null, runLastStage: null, runLocal: null, account: null, selectedPos: null, quotes: [], gamify: null, review: null, totw: null, calendar: null, mood: null, why: {}, debateUi: {}, debateLocal: {}, judgeUi: {}, judgeLocal: {}, judgeBatch: {} });
   resetJudge();
+  resetKronos();
   resetWhatif();
   resetReview();
   const mb = $('mood-bar');

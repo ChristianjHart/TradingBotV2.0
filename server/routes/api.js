@@ -29,6 +29,7 @@ import { personaList } from '../services/personas.js';
 import { isAiError } from '../services/aiErrors.js';
 import { buildReview } from '../services/review.js';
 import { runExperiments } from '../services/experiments.js';
+import { forecastProposal, kronosConfigured } from '../services/kronos.js';
 import { judgeProposal, judgeMany, judgeScorecard, isJudging, unchecked, JUDGE } from '../services/judge.js';
 
 const router = Router();
@@ -70,6 +71,7 @@ router.get('/health', (_req, res) => {
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
+    forecastConfigured: kronosConfigured(),
     finnhubConfigured: hasFinnhubKey(),
     supabaseConfigured: supabaseEnabled,
     mockData: alpaca.usingMock(),
@@ -132,7 +134,7 @@ router.get('/review', (_req, res) => {
   const positions = store.getPositions();
   const proposals = store.getProposals();
   const perf = computePerformance({ positions, snapshots: store.getEquity(), pickRecords: store.getPickScores(), proposals, settings: store.getSettings(), startingEquity: config.paperEquity });
-  res.json({ ...buildReview({ proposals, positions, startingEquity: config.paperEquity, baselines: perf.baselines }), useLessons: store.getSettings().useLessons === true, judge: judgeScorecard(proposals) });
+  res.json({ ...buildReview({ proposals, positions, startingEquity: config.paperEquity, baselines: perf.baselines }), useLessons: store.getSettings().useLessons === true, judge: judgeScorecard(proposals), kronos: judgeScorecard(proposals, 'kronos') });
 });
 // Replays past proposals under ready-made rule changes (fetches price history, so it is a separate call).
 router.get('/review/experiments', asyncHandler(async (_req, res) => res.json(await runExperiments())));
@@ -264,6 +266,17 @@ router.post('/proposals/:id/judge', judgeLimit, asyncHandler(async (req, res) =>
     res.json(await judgeProposal(req.params.id, { runs, force: wantsForce(req) }));
   } catch (err) {
     if (isAiError(err)) return res.status(AI_STATUS[err.code] ?? 502).json({ error: err.message, code: err.code });
+    sendError(res, err);
+  }
+}));
+// Kronos forecast (optional): a price-path model run on recent hourly bars. Advice only. See services/kronos.js.
+router.get('/forecast/status', (_req, res) => res.json({ configured: kronosConfigured() }));
+router.post('/proposals/:id/forecast', judgeLimit, asyncHandler(async (req, res) => {
+  if (!PROPOSAL_ID.test(req.params.id)) return res.status(404).json({ error: 'proposal not found', code: 'not_found' });
+  try {
+    res.json(await forecastProposal(req.params.id, { force: wantsForce(req) }));
+  } catch (err) {
+    if (err?.status && err?.code) return res.status(err.status).json({ error: err.message, code: err.code });
     sendError(res, err);
   }
 }));

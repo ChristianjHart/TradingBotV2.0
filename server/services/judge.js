@@ -200,16 +200,16 @@ function welch(a, b) {
  * Compare what the checker said with what happened. Only checks made BEFORE the trade's horizon ended count (a check made after the
  * result is known proves nothing). Returns { enough, judged, take, skip, split, difference, filter, calibration, verdict, ... }.
  */
-export function judgeScorecard(proposals = []) {
+export function judgeScorecard(proposals = [], key = 'judge') {
   const byId = new Map(proposals.map((p) => [p.id, p]));
   let late = 0;
   const judged = [];
   for (const r of outcomeRows(proposals)) {
     const p = byId.get(r.id);
-    const j = p?.judge?.stats;
+    const j = p?.[key]?.stats;
     if (!j) continue;
     const ends = Date.parse(p.createdAt) + (p.horizonHours || 24) * HOUR;
-    if (!(Date.parse(p.judge.at) < ends)) {
+    if (!(Date.parse(p[key].at) < ends)) {
       late += 1;
       continue;
     }

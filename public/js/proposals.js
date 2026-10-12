@@ -7,6 +7,7 @@ import { revealSection } from './sections.js';
 import { jumpTo, modal, toast } from './ui.js';
 import { autoRejectText } from './news-logic.js';
 import { handleWhyAct, personaBadge, whyHtml, whySig } from './explain.js';
+import { askKronos, kronosRowHtml, kronosSig } from './kronos.js';
 import { askChecker, checkAll, checkAllLabel, judgeRowHtml, judgeSig } from './judge.js';
 
 /* ---------- selectors over state ---------- */
@@ -87,6 +88,7 @@ export function cardHtml(v, busy, msg, p = null) {
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
     ${newsCtxHtml(v.news)}
     ${p ? judgeRowHtml(p) : ''}
+    ${p ? kronosRowHtml(p) : ''}
     ${p ? whyHtml(p) : ''}
     ${riskHtml(v)}
     ${p ? (personaBadge(p) ? `<p class="pc-src dim">${personaBadge(p)}</p>` : '') : `<p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>`}
@@ -100,7 +102,7 @@ export function cardHtml(v, busy, msg, p = null) {
 
 /** Signature of everything a card shows except the ticking countdown text, so live polls only touch cards that changed. */
 function sigOf(v, busy, msg, p = null) {
-  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '', p ? judgeSig(p) : '']);
+  return JSON.stringify([v.id, v.allocationUsd, v.entry, v.stop, v.target, v.confidencePct, v.reason, v.risk, v.news, v.demo, v.model, v.expired, v.left.level, busy || '', msg || '', v.status, p ? whySig(p) : '', p ? judgeSig(p) : '', p ? kronosSig(p) : '']);
 }
 
 /** Keyed reconcile: keep untouched card nodes (scroll, expanded text, focus) and replace only the changed ones. */
@@ -442,6 +444,12 @@ function onPendingClick(e) {
     case 'judge-redo': {
       const p = pendingList().find((x) => String(x.id) === id);
       if (p) askChecker(p, b.dataset.act === 'judge-redo', patchProposals);
+      break;
+    }
+    case 'forecast':
+    case 'forecast-redo': {
+      const p = pendingList().find((x) => String(x.id) === id);
+      if (p) askKronos(p, b.dataset.act === 'forecast-redo', patchProposals);
       break;
     }
     case 'why':

@@ -175,6 +175,11 @@ export const config = {
     get mockLlmRequested() {
       return isTrue(envAny('MOCK_LLM'));
     },
+    /** KRONOS_URL: base URL of the optional Kronos forecast service (scripts/kronos_server.py). Env only, never set from the browser. */
+    get kronosUrl() {
+      const v = envAny('KRONOS_URL').trim();
+      return /^https?:\/\/[^\s]+$/i.test(v) ? v.replace(/\/+$/, '') : '';
+    },
     get proposalTtlHours() {
       const n = Number(envAny('PROPOSAL_TTL_HOURS'));
       return envAny('PROPOSAL_TTL_HOURS') !== '' && Number.isFinite(n) && n > 0 ? n : 6;

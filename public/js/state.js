@@ -30,6 +30,8 @@ export const state = {
   debateUi: {}, // proposal id -> { busy, error } for the bull/bear debate request
   debateLocal: {}, // proposal id -> debate just received (shown until the next poll carries it)
   judgeUi: {}, // proposal id -> { busy, error } for the AI checker request
+  kronosUi: {}, // proposal id -> { busy, error } for the Kronos forecast request
+  kronosLocal: {}, // proposal id -> forecast just received
   judgeLocal: {}, // proposal id -> check just received (shown until the next poll carries it)
   judgeBatch: {}, // proposal id -> true while "Check all" has queued it
   propTab: 'pending',
