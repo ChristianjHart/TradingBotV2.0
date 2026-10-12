@@ -28,5 +28,13 @@ Kronos-base has about 100M parameters. It runs on a CPU, slowly (expect tens of 
 
 `KRONOS_URL` is read from the environment only, never from the browser.
 
+## Modal (serverless GPU)
+```
+pip install modal && modal setup                       # log in
+modal secret create kronos-token KRONOS_TOKEN=<long random string>
+modal deploy scripts/kronos_modal.py                   # prints https://...modal.run
+```
+Then give the bot `KRONOS_URL=<that URL>` and `KRONOS_TOKEN=<same string>`. The service refuses calls without the token. It uses a T4 GPU, scales to zero when idle, and bills only while it runs. The first call after idle loads the model (about a minute).
+
 ## Status
 `scripts/kronos_server.py` follows the Kronos README but was **not run against the real weights** when written. The bot side is tested with a stand-in service. Check the first forecasts by hand. Expect the scorecard to need 20+ forecast trades before it says anything.

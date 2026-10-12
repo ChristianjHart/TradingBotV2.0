@@ -65,10 +65,11 @@ async function callService(body) {
   const ctl = AbortSignal.timeout(KRONOS.TIMEOUT_MS);
   let res;
   try {
-    res = await fetch(`${config.ai.kronosUrl}/forecast`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ctl, redirect: 'error' });
+    res = await fetch(`${config.ai.kronosUrl}/forecast`, { method: 'POST', headers: { 'content-type': 'application/json', ...(config.ai.kronosToken ? { authorization: `Bearer ${config.ai.kronosToken}` } : {}) }, body: JSON.stringify(body), signal: ctl, redirect: 'error' });
   } catch (err) {
     throw httpErr(err?.name === 'TimeoutError' ? 504 : 502, err?.name === 'TimeoutError' ? 'timeout' : 'forecast_unreachable', err?.name === 'TimeoutError' ? 'The forecast service took too long.' : 'Cannot reach the forecast service. Check KRONOS_URL and that it is running.');
   }
+  if (res.status === 401 || res.status === 403) throw httpErr(502, 'forecast_unauthorized', 'The forecast service refused the token. Check KRONOS_TOKEN.');
   if (!res.ok) throw httpErr(502, 'forecast_failed', `The forecast service answered ${res.status}.`);
   try {
     return await res.json();

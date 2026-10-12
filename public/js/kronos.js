@@ -9,6 +9,7 @@ const pctText = (x) => `${Math.round(x * 100)}%`;
 const PROBLEMS = {
   not_configured: 'The forecast service is not set up.',
   forecast_unreachable: 'Cannot reach the forecast service. Check that it is running.',
+  forecast_unauthorized: 'The forecast service refused the token. Check KRONOS_TOKEN.',
   forecast_failed: 'The forecast service failed. Check its log.',
   invalid_output: 'The forecast service sent a bad reply.',
   timeout: 'The forecast took too long. Try again.',

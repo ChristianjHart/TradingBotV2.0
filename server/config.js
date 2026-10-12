@@ -180,6 +180,10 @@ export const config = {
       const v = envAny('KRONOS_URL').trim();
       return /^https?:\/\/[^\s]+$/i.test(v) ? v.replace(/\/+$/, '') : '';
     },
+    /** KRONOS_TOKEN: secret sent to the forecast service as a bearer token (needed when it is hosted on a public URL such as Modal). */
+    get kronosToken() {
+      return envAny('KRONOS_TOKEN').trim();
+    },
     get proposalTtlHours() {
       const n = Number(envAny('PROPOSAL_TTL_HOURS'));
       return envAny('PROPOSAL_TTL_HOURS') !== '' && Number.isFinite(n) && n > 0 ? n : 6;

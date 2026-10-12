@@ -18,12 +18,15 @@ await new Promise((r) => (server = createApp().listen(0, '127.0.0.1', () => r((b
 let mode = 'up';
 let calls = 0;
 let lastBody = null;
+let lastAuth = '';
 const fake = http.createServer((req, res) => {
   let b = '';
   req.on('data', (d) => (b += d));
   req.on('end', () => {
     calls += 1;
+    lastAuth = req.headers.authorization || '';
     lastBody = JSON.parse(b);
+    if (mode === 'deny') return res.writeHead(401).end('{}');
     if (mode === 'down') return res.writeHead(500).end('{}');
     if (mode === 'junk') return res.writeHead(200).end(JSON.stringify({ paths: [[{ h: -1, l: 2, c: 3 }]] }));
     const last = lastBody.bars[lastBody.bars.length - 1].c;
@@ -124,4 +127,14 @@ test('KRONOS_URL must be an http(s) URL; junk is ignored', () => {
   assert.equal(config.ai.kronosUrl, '');
   process.env.KRONOS_URL = 'http://host:1/';
   assert.equal(config.ai.kronosUrl, 'http://host:1');
+});
+
+test('KRONOS_TOKEN is sent as a bearer token and a refusal is explained', async () => {
+  process.env.KRONOS_TOKEN = 'secret-abc';
+  const p = make();
+  assert.equal((await api(`/proposals/${p.id}/forecast`, 'POST')).status, 200);
+  assert.equal(lastAuth, 'Bearer secret-abc');
+  mode = 'deny';
+  assert.equal((await api(`/proposals/${p.id}/forecast?force=1`, 'POST')).body.code, 'forecast_unauthorized');
+  process.env.KRONOS_TOKEN = '';
 });
