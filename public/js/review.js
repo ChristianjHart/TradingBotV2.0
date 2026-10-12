@@ -2,11 +2,13 @@ import { api, escapeHtml as esc } from './api.js';
 import { refresh } from './data.js';
 import { exitLabel, ideaRows, impactText, moneyTiles, plainUsd, reviewSummary, usd, weakRows } from './review-logic.js';
 import { scorecardView } from './judge-logic.js';
+import { chartSvg, compareSummary, itemView } from './kronos-logic.js';
 import { $, empty, hooks, setHtml, skeleton, state } from './state.js';
 import { toast } from './ui.js';
 
 /* Loss review section: where the money went, which groups of trades look weak (and how likely that is luck), ideas to test, lessons. */
 
+let cmp = { status: 'idle', data: null, error: '' }; // Kronos forecasts vs what happened (same states as ideas)
 let ideas = { status: 'idle', data: null, error: '' }; // status: idle | busy | done | error
 
 export const reviewSectionSummary = () => reviewSummary(state.review);
@@ -35,6 +37,23 @@ function ideasHtml() {
     .map((r) => `<tr><th scope="row">${esc(r.title)}<small class="dim">${esc(r.why)}</small></th><td class="mono ${r.tone}" data-label="P&amp;L change">${esc(r.deltaText)}</td><td class="mono" data-label="Worst dip">${esc(r.dip)}</td><td data-label="Holds?">${r.holds ? '<span class="chip chip-ok">✓ BOTH HALVES</span>' : '<span class="dim">no</span>'}</td></tr>`)
     .join('')}</tbody></table>
     <p class="dim rv-note">${ex.replayed} past proposals. ${esc(ex.note)}</p><button type="button" class="btn-ghost" data-rv="ideas">Run again</button>`;
+}
+
+/** Kronos forecasts drawn next to the real price. Shown only when the server has a forecast service. */
+function kronosHtml() {
+  if (!state.status?.forecastConfigured) return '';
+  let body;
+  if (cmp.status === 'busy') body = '<div class="rv-busy" role="status"><span class="spin" aria-hidden="true"></span> Loading forecasts and real prices…</div>';
+  else if (cmp.status === 'error') body = `<p class="rv-err" role="alert">${esc(cmp.error)}</p><button type="button" class="btn-ghost" data-rv="kronos">Try again</button>`;
+  else if (cmp.status !== 'done') body = '<button type="button" class="btn-ghost" data-rv="kronos">Show forecasts vs real prices</button><p class="dim rv-note">Each chart shows Kronos’s middle 80% of paths, its median path, and what the price really did.</p>';
+  else {
+    const rows = cmp.data.items.map((it) => {
+      const v = itemView(it);
+      return `<li class="kr-item"><div class="kr-head"><strong>${esc(v.head)}</strong>${v.right ? `<span class="chip ${v.right === 'right direction' ? 'chip-ok' : 'chip-warn'}">${esc(v.right.toUpperCase())}</span>` : ''}</div><div class="kr-chart" role="img" aria-label="${esc(v.label)}">${chartSvg(it)}</div><p class="dim kr-note">${esc(v.state)}. ${esc(v.detail)}</p></li>`;
+    });
+    body = `<p class="rv-note">${esc(compareSummary(cmp.data.summary))}</p>${rows.length ? `<ul class="kr-list">${rows.join('')}</ul><p class="dim kr-key"><span class="kr-k kr-k-band"></span> middle 80% of paths <span class="kr-k kr-k-med"></span> median <span class="kr-k kr-k-real"></span> real price</p>` : ''}<button type="button" class="btn-ghost" data-rv="kronos">Refresh</button>`;
+  }
+  return `<h3 class="rv-h">Kronos forecasts vs real prices</h3>${body}`;
 }
 
 /** "Does the AI checker help?": what it said versus what happened. */
@@ -72,6 +91,7 @@ export function reviewHtml() {
     ${edgesHtml(rv)}
     <h3 class="rv-h">Ideas to test</h3>${ideasHtml()}
     <h3 class="rv-h">Does the AI checker help?</h3>${checkerHtml(rv)}
+    ${kronosHtml()}
     <h3 class="rv-h">Lessons for the trader</h3>${lessonsHtml(rv)}`;
 }
 
@@ -86,6 +106,17 @@ async function runIdeas() {
     ideas = { status: 'done', data: await api('/review/experiments'), error: '' };
   } catch (e) {
     ideas = { status: 'error', data: null, error: e.network ? 'Cannot reach the server. Try again.' : `The test did not run: ${e.message}` };
+  }
+  patchReview();
+}
+
+async function runCompare() {
+  cmp = { status: 'busy', data: null, error: '' };
+  patchReview();
+  try {
+    cmp = { status: 'done', data: await api('/forecast/compare'), error: '' };
+  } catch (e) {
+    cmp = { status: 'error', data: null, error: e.network ? 'Cannot reach the server. Try again.' : `Could not load forecasts: ${e.message}` };
   }
   patchReview();
 }
@@ -108,10 +139,12 @@ async function toggleLessons() {
 export function bindReview() {
   $('w-review')?.addEventListener('click', (e) => {
     if (e.target.closest('[data-rv="ideas"]')) runIdeas();
+    else if (e.target.closest('[data-rv="kronos"]')) runCompare();
     else if (e.target.closest('#rv-sw')) toggleLessons();
   });
 }
 
 export function resetReview() {
   ideas = { status: 'idle', data: null, error: '' };
+  cmp = { status: 'idle', data: null, error: '' };
 }

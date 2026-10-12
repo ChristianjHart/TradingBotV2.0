@@ -29,7 +29,7 @@ import { personaList } from '../services/personas.js';
 import { isAiError } from '../services/aiErrors.js';
 import { buildReview } from '../services/review.js';
 import { runExperiments } from '../services/experiments.js';
-import { forecastProposal, kronosConfigured } from '../services/kronos.js';
+import { compareForecasts, forecastProposal, kronosConfigured } from '../services/kronos.js';
 import { judgeProposal, judgeMany, judgeScorecard, isJudging, unchecked, JUDGE } from '../services/judge.js';
 
 const router = Router();
@@ -71,7 +71,6 @@ router.get('/health', (_req, res) => {
     mode: 'predict',
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
-    forecastConfigured: kronosConfigured(),
     finnhubConfigured: hasFinnhubKey(),
     supabaseConfigured: supabaseEnabled,
     mockData: alpaca.usingMock(),
@@ -271,6 +270,7 @@ router.post('/proposals/:id/judge', judgeLimit, asyncHandler(async (req, res) =>
 }));
 // Kronos forecast (optional): a price-path model run on recent hourly bars. Advice only. See services/kronos.js.
 router.get('/forecast/status', (_req, res) => res.json({ configured: kronosConfigured() }));
+router.get('/forecast/compare', asyncHandler(async (_req, res) => res.json(await compareForecasts())));
 router.post('/proposals/:id/forecast', judgeLimit, asyncHandler(async (req, res) => {
   if (!PROPOSAL_ID.test(req.params.id)) return res.status(404).json({ error: 'proposal not found', code: 'not_found' });
   try {
@@ -333,6 +333,7 @@ router.get('/status', (_req, res) => {
     accuracy: accuracy(),
     alpacaConfigured: hasAlpacaCredentials(),
     openrouterConfigured: hasOpenRouterKey(),
+    forecastConfigured: kronosConfigured(),
     supabaseConfigured: supabaseEnabled,
     run: runState,
     ai: aiStatus(), // { required:true, ready, blockedReason?, demo }

@@ -87,6 +87,37 @@ function checkerCardHtml(s) {
     <p class="dim">Pick the checker’s model in <a class="prop-link" href="#settings/models">Models</a>. A different model than the trader gives a more independent opinion.</p></section>`;
 }
 
+function kronosCardHtml(s) {
+  const set = state.status?.forecastConfigured === true;
+  const on = s.autoForecast === true;
+  return `<section class="widget checker-card" id="sec-kronos" aria-labelledby="h-kronos"><h2 class="widget-title" id="h-kronos">KRONOS FORECAST</h2>
+    <p class="dim">Kronos draws many possible price paths for each pending trade and shows how many end in profit. It saves each forecast, so Loss review can later show it next to the real price. It gives advice only.</p>
+    ${set ? '' : '<p class="dim">Not set up. The server needs a forecast service (KRONOS_URL). See docs/KRONOS.md.</p>'}
+    <div class="sw-row"><div class="sw-txt"><strong id="kr-l">Forecast every new proposal automatically</strong><p class="dim" id="kr-d">${on ? 'ON. Each run forecasts every new proposal. This uses GPU time on your forecast host.' : 'OFF. You press Forecast on the proposals you care about.'}</p></div>
+      <button type="button" class="switch" id="sw-kronos" role="switch" aria-checked="${on}" aria-labelledby="kr-l" aria-describedby="kr-d"${set ? '' : ' disabled'}><span class="sw-knob" aria-hidden="true"></span><span class="sw-state">${on ? 'ON' : 'OFF'}</span></button></div></section>`;
+}
+
+function wireKronos() {
+  const sw = $('sw-kronos');
+  if (!sw) return;
+  sw.addEventListener('click', async () => {
+    const next = sw.getAttribute('aria-checked') !== 'true';
+    sw.disabled = true;
+    try {
+      await savePatch({ autoForecast: next });
+      sw.setAttribute('aria-checked', String(next));
+      sw.querySelector('.sw-state').textContent = next ? 'ON' : 'OFF';
+      $('kr-d').textContent = next ? 'ON. Each run forecasts every new proposal. This uses GPU time on your forecast host.' : 'OFF. You press Forecast on the proposals you care about.';
+      toast(next ? 'Auto-forecast is ON' : 'Auto-forecast is OFF', next ? 'warn' : 'success');
+      await refresh();
+    } catch (e) {
+      toast(`Could not save: ${e.message}`, 'error');
+    } finally {
+      sw.disabled = false;
+    }
+  });
+}
+
 function wireChecker() {
   const sw = $('sw-checker');
   if (!sw) return;
@@ -252,7 +283,7 @@ export function mountSettings() {
       ${state.auth.required && state.auth.mode !== 'session' ? `<button class="btn-ghost" id="btn-auth2" type="button">${getToken() ? 'Sign out' : 'Sign in'}</button>` : ''}
     </section></div>
     <div class="settings-grid">${newsCardHtml(s)}${edgeCardHtml(s)}</div>
-    <div class="settings-grid">${personaCardHtml(s)}${checkerCardHtml(s)}</div>
+    <div class="settings-grid">${personaCardHtml(s)}${checkerCardHtml(s)}${kronosCardHtml(s)}</div>
     <div class="settings-grid account-grid" id="account-root" aria-live="polite"></div></div>`;
   if (state.auth.mode !== 'token') mountAccount($('account-root'));
   mountSchedule($('sched-root')).then(applySettingsFocus);
@@ -263,6 +294,7 @@ export function mountSettings() {
   wireEdge();
   wirePersona();
   wireChecker();
+  wireKronos();
   patchBudgetCard();
   $('btn-auth2')?.addEventListener('click', authClick);
   applySettingsFocus();

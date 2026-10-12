@@ -138,3 +138,63 @@ test('KRONOS_TOKEN is sent as a bearer token and a refusal is explained', async 
   assert.equal((await api(`/proposals/${p.id}/forecast?force=1`, 'POST')).body.code, 'forecast_unauthorized');
   process.env.KRONOS_TOKEN = '';
 });
+
+test('forecast saves a band, and compare shows it next to the real closes once the horizon is over', async () => {
+  const p = make('AMD');
+  await api(`/proposals/${p.id}/forecast`, 'POST');
+  const saved = store.getProposals().find((x) => x.id === p.id).kronos;
+  assert.equal(saved.band.p50.length, 24);
+  assert.ok(saved.band.p10[5] <= saved.band.p50[5] && saved.band.p50[5] <= saved.band.p90[5]);
+  assert.ok(Date.parse(saved.startT) > 0 && saved.lastClose > 0);
+  // pretend the forecast was made 3 days ago, so its 24 hours are over and the (mock) bars after it can be compared
+  const start = new Date(Date.now() - 72 * 3600e3).toISOString();
+  store.setProposals(store.getProposals().map((x) => (x.id === p.id ? { ...x, kronos: { ...x.kronos, startT: start } } : x)));
+  const cmp = (await api('/forecast/compare')).body;
+  assert.equal(cmp.items.length, 1);
+  assert.equal(cmp.items[0].complete, true);
+  assert.ok(cmp.items[0].actual.length > 0 && cmp.items[0].actual.length <= 24);
+  assert.equal(store.getProposals().find((x) => x.id === p.id).kronos.actualDone, true); // saved for good
+  assert.ok(cmp.summary.complete === 1 && cmp.summary.inside >= 0 && cmp.summary.inside <= 1);
+});
+
+test('scoreForecast: inside share and direction', () => {
+  const k = { lastClose: 100, band: { p10: [99, 98], p50: [100.5, 101], p90: [102, 104] }, actual: [{ c: 100.2 }, { c: 105 }] };
+  assert.deepEqual(K.scoreForecast(k), { hours: 2, inside: 0.5, direction: true, medianErrorPct: -3.81 });
+  assert.equal(K.scoreForecast({ ...k, actual: [] }), null);
+});
+
+test('bandOf is ordered p10 <= p50 <= p90 per hour', () => {
+  const paths = [1, 2, 3, 4, 5].map((v) => [{ c: v }, { c: v * 2 }]);
+  const b = K.bandOf(paths);
+  assert.deepEqual(b.p50, [3, 6]);
+  assert.ok(b.p10[0] < b.p50[0] && b.p50[1] < b.p90[1]);
+});
+
+test('forecastMany works through a list and stops when the service is unset; autoForecast is a validated setting', async () => {
+  const { validateSettings } = await import('../server/middleware.js');
+  assert.equal(validateSettings({ autoForecast: true }).error, undefined);
+  assert.ok(validateSettings({ autoForecast: 'yes' }).error);
+  assert.equal(store.getSettings().autoForecast, false);
+  const a = make('AAPL');
+  const b = make('MSFT');
+  const r = await K.forecastMany([a.id, b.id]);
+  assert.deepEqual(r, { done: 2, cached: 0, failed: 0 });
+  assert.equal((await K.forecastMany([a.id])).cached, 1);
+  process.env.KRONOS_URL = '';
+  const c = make('TSLA');
+  assert.equal((await K.forecastMany([c.id, c.id])).failed, 1); // stops after the first not_configured
+});
+
+test('/api/status tells the page whether the forecast service is set up', async () => {
+  assert.equal((await api('/status')).body.forecastConfigured, true);
+  process.env.KRONOS_URL = '';
+  assert.equal((await api('/status')).body.forecastConfigured, false);
+});
+
+test('a forecast is refused when the price history is far from the proposal entry', async () => {
+  const p = createProposals({ runId: 'run_k_far', items: [{ symbol: 'NVDA', side: 'long', quoted: 5000, entry: 5000, stop: 4800, target: 5300, alloc: 5000, atrPct: 2, confidence: 0.7, reason: 'r', scannerReason: 's', setup: {}, riskCheck: { ok: true, notes: [] } }], source: 'ai', models: { scanner: 'a', trader: 'b' } })[0];
+  const r = await api(`/proposals/${p.id}/forecast`, 'POST');
+  assert.equal(r.status, 409);
+  assert.equal(r.body.code, 'price_mismatch');
+  assert.equal(calls, 0); // the paid/slow service was never called
+});

@@ -109,6 +109,7 @@ export const SETTING_RULES = {
   botPersona: isPersonaId, // cosmetic voice of the trader bot (closed whitelist, see services/personas.js)
   useLessons: bool, // OFF by default; when true the trader prompt carries fact lines from the loss review
   judgeRuns: (v) => Number.isInteger(v) && v >= 2 && v <= 15, // how many times the AI checker is asked per proposal
+  autoForecast: bool, // OFF by default; when true every new proposal is forecast with Kronos after a run (needs KRONOS_URL; costs GPU time, no AI budget)
   autoJudge: bool, // OFF by default; when true every new proposal is checked automatically (spends AI budget)
 };
 

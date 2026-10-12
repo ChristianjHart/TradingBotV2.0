@@ -14,6 +14,7 @@ const PROBLEMS = {
   invalid_output: 'The forecast service sent a bad reply.',
   timeout: 'The forecast took too long. Try again.',
   no_history: 'Not enough price history for this symbol.',
+  price_mismatch: 'The price history does not match this trade’s entry price, so no forecast was made.',
   not_pending: 'Only pending trades can be forecast.',
 };
 const problem = (e) => (e?.network ? 'Cannot reach the server. Check your connection.' : PROBLEMS[e?.code] || e?.message || 'The forecast could not run.');

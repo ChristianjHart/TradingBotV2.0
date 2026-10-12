@@ -68,6 +68,7 @@ const defaults = {
     // AI checker (services/judge.js): how many times to ask, and whether to check every new proposal automatically. Auto is OFF (it spends budget).
     judgeRuns: 3,
     autoJudge: false,
+    autoForecast: false,
   },
   worker: {
     status: 'online',

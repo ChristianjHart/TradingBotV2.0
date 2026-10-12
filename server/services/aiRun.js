@@ -14,6 +14,7 @@ import { mockLlmEnabled } from './mockLlm.js';
 import { budgetStatus, estimateCallCostUsd } from './spend.js';
 import { setupOf } from './debate.js';
 import { judgeMany } from './judge.js';
+import { forecastMany, kronosConfigured } from './kronos.js';
 
 const log = (msg) => console.log(`[run] ${msg}`);
 
@@ -172,6 +173,8 @@ export function startAiRun({ trigger } = {}) {
       store.setWorker({ ...store.getWorker(), lastScanAt: new Date().toISOString() });
       // Optional (setting autoJudge, off by default): ask the AI checker about every new proposal, in the background.
       if (store.getSettings().autoJudge === true && trades.proposals.length) judgeMany(trades.proposals.map((p) => p.id)).catch(() => {});
+      // Optional (setting autoForecast, off by default): forecast every new proposal with Kronos, in the background.
+      if (store.getSettings().autoForecast === true && kronosConfigured() && trades.proposals.length) forecastMany(trades.proposals.map((p) => p.id)).catch(() => {});
       log(`trader bot ${trades.source} → ${trades.proposalCount} proposals (${lap()})`);
       runState.stage = 'done';
     } catch (err) {

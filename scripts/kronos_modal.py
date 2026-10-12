@@ -14,6 +14,20 @@ import modal
 MODEL_ID, TOKENIZER_ID = "NeoQuasar/Kronos-base", "NeoQuasar/Kronos-Tokenizer-base"
 MAX_SAMPLES, MAX_HORIZON = 100, 48
 
+def draw_paths(predictor, x, x_ts, y_ts, horizon, samples, chunk=16):
+    """`samples` different future paths. Uses the library's batch call (one GPU pass per chunk); falls back to one call per path."""
+    outs = []
+    done = 0
+    while done < samples:
+        n = min(chunk, samples - done)
+        try:
+            outs += predictor.predict_batch([x] * n, [x_ts] * n, [y_ts] * n, horizon, T=1.0, top_p=0.9, sample_count=1, verbose=False)
+        except (AttributeError, TypeError):  # older Kronos without predict_batch: slower, same result
+            outs += [predictor.predict(df=x, x_timestamp=x_ts, y_timestamp=y_ts, pred_len=horizon, T=1.0, top_p=0.9, sample_count=1, verbose=False) for _ in range(n)]
+        done += n
+    return [[{"o": float(r.open), "h": float(r.high), "l": float(r.low), "c": float(r.close)} for r in out.itertuples()] for out in outs]
+
+
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
@@ -49,10 +63,7 @@ class Forecaster:
         x["amount"] = x["volume"] * x[["open", "high", "low", "close"]].mean(axis=1)
         x_ts = pd.Series(ts.values)
         y_ts = pd.Series(pd.date_range(ts.iloc[-1] + pd.Timedelta(hours=1), periods=horizon, freq="h"))
-        paths = []
-        for _ in range(samples):  # one draw per call: the library averages inside a call when sample_count > 1
-            out = self.predictor.predict(df=x, x_timestamp=x_ts, y_timestamp=y_ts, pred_len=horizon, T=1.0, top_p=0.9, sample_count=1, verbose=False)
-            paths.append([{"o": float(r.open), "h": float(r.high), "l": float(r.low), "c": float(r.close)} for r in out.itertuples()])
+        paths = draw_paths(self.predictor, x, x_ts, y_ts, horizon, samples)
         return {"model": MODEL_ID, "paths": paths}
 
     @modal.asgi_app()

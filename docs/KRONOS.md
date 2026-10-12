@@ -11,6 +11,12 @@
 
 It is advice only. It never approves or rejects. It uses no AI budget.
 
+## Saved forecasts and the comparison chart
+Each forecast is saved on the proposal: the middle 80% band (p10, median, p90 close for every hour), the start time and start price. After the forecast's hours are over, the real closes are saved next to it. Loss review > "Kronos forecasts vs real prices" draws both, with the entry, stop and target lines, and scores them: how many hours the real price stayed inside the band (about 80% if it is a good forecast), and whether the median path pointed the right way. The forecast is refused when the latest bar price differs from the proposal entry by more than 15% (bad data).
+
+## Auto-forecast
+Settings > Kronos forecast > "Forecast every new proposal automatically" (off by default). After each run, the new proposals are forecast one after another in the background. It needs `KRONOS_URL`; it uses GPU time on your host, not AI budget.
+
 ## Run it
 ```
 git clone https://github.com/shiyu-coder/Kronos
