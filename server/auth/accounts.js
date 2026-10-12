@@ -103,7 +103,7 @@ export async function saveKeys(body) {
   return { ok: true };
 }
 
-const MODEL_RE = /^[\w.\-:/]{1,100}$/;
+const MODEL_RE = /^~?[\w.\-:/]{1,100}$/; // a leading ~ is the OpenRouter "latest" alias form, e.g. ~typesafe/jev-latest
 
 /**
  * Body: {scannerModel?, traderModel?, newsModel?, judgeModel?} ('' resets to the env default). Ids are validated by regex and, when the model
@@ -120,7 +120,7 @@ export async function saveModels(body) {
   for (const field of ['scannerModel', 'traderModel', 'newsModel', 'judgeModel']) {
     if (body[field] === undefined) continue;
     const v = typeof body[field] === 'string' ? body[field].trim() : null;
-    if (v === null || (v !== '' && !MODEL_RE.test(v))) return { status: 400, error: `${field} must match [A-Za-z0-9_.-:/] (max 100 chars)` };
+    if (v === null || (v !== '' && !MODEL_RE.test(v))) return { status: 400, error: `${field} must match [A-Za-z0-9_.-:/], with an optional leading ~ (max 100 chars)` };
     if (v) {
       models[field] = v;
       if (catalog && !catalog.some((m) => m.id === v)) warnings.push(`${field}: "${v}" is not in the OpenRouter catalog (saved anyway; a run will fail with model_unavailable if it does not exist)`);

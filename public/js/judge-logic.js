@@ -73,7 +73,7 @@ export const JUDGE_ERRORS = {
   timeout: 'The checker took too long. Try again.',
   upstream_error: 'Could not reach the checker model. Try again.',
   not_pending: 'Only a pending proposal can be checked.',
-  invalid_runs: 'Pick 2 to 5 runs.',
+  invalid_runs: 'Pick 2 to 15 runs.',
 };
 /** Plain words for a failed check (`e` from api(): {status, code, message, network}). */
 export const judgeProblem = (e) => (e?.network ? 'Cannot reach the server. Check your connection and try again.' : JUDGE_ERRORS[e?.code] || e?.message || 'The check could not run.');

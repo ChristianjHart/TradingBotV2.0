@@ -83,7 +83,7 @@ function checkerCardHtml(s) {
     <p class="dim">A second AI gives an independent opinion on each pending proposal: is it worth taking, and how likely is a profit? It sees only the numbers, not the first AI’s confidence or reasoning. It asks several times so you can see how much the answers agree. It gives advice only. You still approve each trade.</p>
     <div class="sw-row"><div class="sw-txt"><strong id="ck-l">Check every new proposal automatically</strong><p class="dim" id="ck-d">${on ? 'ON. Each run asks the checker about every new proposal. This uses AI budget.' : 'OFF (recommended). You press Ask the AI checker on the proposals you care about.'}</p></div>
       <button type="button" class="switch" id="sw-checker" role="switch" aria-checked="${on}" aria-labelledby="ck-l" aria-describedby="ck-d"><span class="sw-knob" aria-hidden="true"></span><span class="sw-state">${on ? 'ON' : 'OFF'}</span></button></div>
-    <label class="ck-runs" for="ck-runs">Times to ask per proposal<select id="ck-runs">${[2, 3, 4, 5].map((n) => `<option value="${n}"${n === runs ? ' selected' : ''}>${n}</option>`).join('')}</select><span class="fld-hint">More times gives steadier stats and costs more. Each ask is a small call.</span></label>
+    <label class="ck-runs" for="ck-runs">Times to ask per proposal<select id="ck-runs">${[2, 3, 5, 8, 10, 15].map((n) => `<option value="${n}"${n === runs ? ' selected' : ''}>${n}</option>`).join('')}</select><span class="fld-hint">More times gives steadier stats and costs more. Each ask is a small call.</span></label>
     <p class="dim">Pick the checker’s model in <a class="prop-link" href="#settings/models">Models</a>. A different model than the trader gives a more independent opinion.</p></section>`;
 }
 

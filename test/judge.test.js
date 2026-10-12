@@ -118,7 +118,7 @@ test('a repeat is free; force asks again; ?runs= is honoured and validated', asy
   assert.equal(stub.calls.length, 2, 'no new AI calls');
   await api(`/proposals/${p.id}/judge?force=1&runs=4`, 'POST', {});
   assert.equal(stub.calls.length, 6);
-  assert.equal((await api(`/proposals/${p.id}/judge?runs=9`, 'POST', {})).status, 400);
+  assert.equal((await api(`/proposals/${p.id}/judge?runs=16`, 'POST', {})).status, 400);
   assert.equal((await api(`/proposals/${p.id}/judge?runs=1`, 'POST', {})).body.code, 'invalid_runs');
   stub.restore();
 });
@@ -224,7 +224,7 @@ test('judgeRuns and autoJudge are validated settings, off/3 by default', () => {
   assert.equal(store.getSettings().autoJudge, false);
   assert.equal(store.getSettings().judgeRuns, 3);
   assert.deepEqual(validateSettings({ judgeRuns: 5, autoJudge: true }).value, { judgeRuns: 5, autoJudge: true });
-  for (const bad of [{ judgeRuns: 1 }, { judgeRuns: 6 }, { judgeRuns: 2.5 }, { judgeRuns: '3' }, { autoJudge: 'yes' }]) assert.ok(validateSettings(bad).error, JSON.stringify(bad));
+  for (const bad of [{ judgeRuns: 1 }, { judgeRuns: 16 }, { judgeRuns: 2.5 }, { judgeRuns: '3' }, { autoJudge: 'yes' }]) assert.ok(validateSettings(bad).error, JSON.stringify(bad));
 });
 
 test('the checker model falls back to the trader model, and can be set on its own', () => {

@@ -22,7 +22,7 @@ const r3 = (n) => Math.round(n * 1000) / 1000;
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-export const JUDGE = Object.freeze({ RUNS_MIN: 2, RUNS_MAX: 5, RUNS_DEFAULT: 3, TEMPERATURE: 0.8, MAX_BATCH: 12, MIN_GROUP: 8, MIN_TOTAL: 20 });
+export const JUDGE = Object.freeze({ RUNS_MIN: 2, RUNS_MAX: 15, RUNS_DEFAULT: 3, TEMPERATURE: 0.8, MAX_BATCH: 12, MIN_GROUP: 8, MIN_TOTAL: 20 });
 export const clampRuns = (v) => (Number.isInteger(Number(v)) ? Math.min(JUDGE.RUNS_MAX, Math.max(JUDGE.RUNS_MIN, Number(v))) : JUDGE.RUNS_DEFAULT);
 
 export const JUDGE_SYSTEM = `You are an independent, skeptical reviewer at a trading desk. You see ONE proposed simulated trade as numbers only. You do not see who proposed it or why.
