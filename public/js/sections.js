@@ -1,4 +1,4 @@
-import { foldAllTarget, isSectionOpen, parseSectionPrefs, SECTIONS, SECTIONS_STORE_KEY, sectionLabel, sectionSummary, withSection } from './collapse-logic.js';
+import { foldAllTarget, isSectionOpen, MORE_STORE_KEY, parseMore, parseSectionPrefs, SECONDARY_KEYS, SECTIONS, SECTIONS_STORE_KEY, sectionLabel, sectionSummary, withSection } from './collapse-logic.js';
 
 /* Collapsible dashboard sections (phones only: CSS shows the toggle and honours .is-collapsed below 700px). */
 
@@ -17,6 +17,36 @@ function save() {
     localStorage.setItem(SECTIONS_STORE_KEY, JSON.stringify(prefs));
   } catch {
     /* storage unavailable: the choice lasts until reload */
+  }
+}
+
+let more = null;
+const moreOn = () => {
+  if (more === null) {
+    try {
+      more = parseMore(localStorage.getItem(MORE_STORE_KEY));
+    } catch {
+      more = false;
+    }
+  }
+  return more;
+};
+
+/** Show or hide the secondary sections (remembered). Updates the page class and the button. */
+export function setMore(on, remember = true) {
+  more = on;
+  if (remember) {
+    try {
+      localStorage.setItem(MORE_STORE_KEY, on ? '1' : '0');
+    } catch {
+      /* storage unavailable: the choice lasts until reload */
+    }
+  }
+  document.querySelector('.page')?.classList.toggle('show-more', on);
+  const b = document.getElementById('btn-more');
+  if (b) {
+    b.setAttribute('aria-expanded', String(on));
+    b.textContent = on ? 'Fewer sections' : `More sections (${SECONDARY_KEYS.length})`;
   }
 }
 
@@ -54,12 +84,17 @@ export function foldAll() {
 
 /** Apply the remembered state to every section in the page. */
 export function applySections(rootEl = document) {
-  rootEl.querySelectorAll('[data-dsec]').forEach((w) => setOpen(w, isSectionOpen(load(), w.dataset.dsec)));
+  rootEl.querySelectorAll('[data-dsec]').forEach((w) => {
+    if (SECTIONS[w.dataset.dsec]?.more) w.setAttribute('data-secondary', '');
+    setOpen(w, isSectionOpen(load(), w.dataset.dsec));
+  });
+  setMore(moreOn(), false);
   syncFoldButton();
 }
 
 export function bindSections(rootEl) {
   rootEl.addEventListener('click', (e) => {
+    if (e.target.closest('#btn-more')) return setMore(!moreOn());
     const b = e.target.closest('[data-dsec-toggle]');
     if (!b) return;
     const w = b.closest('[data-dsec]');
@@ -87,6 +122,7 @@ export function patchSectionSummaries(data) {
 
 /** Make sure `el` is visible: expand a collapsed section around it (not remembered: it is a one-off jump). */
 export function revealSection(el) {
+  if (el?.closest?.('[data-secondary]') && !moreOn()) setMore(true, false);
   const w = el?.closest?.('[data-dsec].is-collapsed');
   if (w) setOpen(w, true);
   return !!w;

@@ -1,21 +1,25 @@
 /* Pure helpers for the collapsible dashboard sections on phones (no DOM, no storage access here). */
 
-/** key -> {title, open by default}. Order is the on-screen order after Proposals (see the #dsec-* order rules in the CSS). */
+/** key -> {title, open by default, more: hidden until "More sections" is pressed}. Order is the on-screen order after Proposals (see the #dsec-* order rules in the CSS). */
 export const SECTIONS = {
   pos: { title: 'Positions', open: true },
   sum: { title: 'AI summary', open: false },
-  picks: { title: 'Top picks', open: false },
-  news: { title: 'News & earnings', open: false },
-  cal: { title: 'Calendar', open: false },
   perf: { title: 'Performance', open: false },
   review: { title: 'Loss review', open: false },
-  fun: { title: 'Achievements', open: false },
-  totw: { title: 'Trade of the week', open: false },
-  alloc: { title: 'Allocation', open: false },
-  sched: { title: 'Schedule', open: false },
-  budget: { title: 'Budget', open: false },
+  picks: { title: 'Top picks', open: false, more: true },
+  news: { title: 'News & earnings', open: false, more: true },
+  cal: { title: 'Calendar', open: false, more: true },
+  fun: { title: 'Achievements', open: false, more: true },
+  totw: { title: 'Trade of the week', open: false, more: true },
+  alloc: { title: 'Allocation', open: false, more: true },
+  sched: { title: 'Schedule', open: false, more: true },
+  budget: { title: 'Budget', open: false, more: true },
 };
 export const SECTION_KEYS = Object.keys(SECTIONS);
+/** Sections tucked behind one "More sections" button, so the page opens with a short list. */
+export const SECONDARY_KEYS = SECTION_KEYS.filter((k) => SECTIONS[k].more);
+export const MORE_STORE_KEY = 'tb_dash_more';
+export const parseMore = (raw) => raw === '1';
 export const SECTIONS_STORE_KEY = 'tb_dash_sections';
 
 /** Parse the stored JSON into {key: boolean}; unknown keys and non-boolean values are dropped, bad input gives {}. */

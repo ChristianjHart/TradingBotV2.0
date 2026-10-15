@@ -22,9 +22,9 @@ const spin = '<span class="spin" aria-hidden="true"></span>';
 export function judgeRowHtml(p) {
   const j = judgeView(judgeOf(p));
   const ui = state.judgeUi[p.id] || {};
-  if (working(p)) return `<div class="pc-judge pc-judge-busy" role="status">${spin} The AI checker is working (${runsSetting()} runs)…</div>`;
+  if (working(p)) return `<div class="pc-judge pc-judge-busy" role="status">${spin} Checking (${runsSetting()} runs)…</div>`;
   if (!j) {
-    return `<div class="pc-judge"><button type="button" class="btn-ghost pcj-btn" data-act="judge">🧐 Ask the AI checker</button><small class="dim">Asks ${runsSetting()} times for a second opinion. Uses AI budget.</small>${ui.error ? `<p class="pcj-err" role="alert">${esc(ui.error)}</p>` : ''}</div>`;
+    return `<button type="button" class="btn-ghost pcj-btn" data-act="judge" title="Asks ${runsSetting()} times for a second opinion. Uses AI budget.">🧐 Check</button>${ui.error ? `<p class="pcj-err" role="alert">${esc(ui.error)}</p>` : ''}`;
   }
   const runs = j.runs.map((r) => `<li><span class="pcj-call pcj-${r.tone}">${esc(r.label)}</span> <strong>${esc(r.pText)}</strong> <span class="dim">${esc(r.reason)}${r.keyRisk ? ` Risk: ${esc(r.keyRisk)}` : ''}</span></li>`).join('');
   const notes = [j.incoherentText, j.failedText, j.stableText].filter(Boolean);

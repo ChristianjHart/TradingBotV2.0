@@ -820,10 +820,14 @@ async function main() {
           const out = [];
           const h = await pg.evaluate(() => document.documentElement.scrollHeight);
           // ~2,300px with ordinary proposals; this stub has very long reasons/names, open positions and mock notices, so allow more.
-          // 3900 = the old 3600 + the market-mood bar and the three collapsed fun sections (achievements, trade of the week, calendar).
-          // 4400 = 3900 + one 44px "Ask the AI checker" button row per pending proposal card (stub data has several) and the "Check all" button.
-          // 4800 = 4400 + one more button row per pending card when a forecast service is set up (this audit runs with KRONOS_URL on).
-          if (h > 4800) out.push(`collapsed dashboard is ${h}px tall (budget 4800 with extreme stub content)`);
+          // The page opens with four sections and one "More sections" button; the other eight stay hidden until it is pressed.
+          // 3800 = about the original budget (was 3600, then 4800 with every section listed) for extreme stub content, measured at 320px wide where text wraps most.
+          if (h > 3800) out.push(`collapsed dashboard is ${h}px tall (budget 3800 with extreme stub content)`);
+          const shown = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].filter((w) => w.offsetParent).length);
+          if (shown !== 4) out.push(`expected 4 visible sections before "More sections", got ${shown}`);
+          const moreH = await pg.evaluate(() => document.getElementById('btn-more')?.getBoundingClientRect().height ?? 0);
+          if (moreH < 44) out.push('the "More sections" button is missing or shorter than 44px');
+          await pg.click('#btn-more');
           const r = await pg.evaluate(() => [...document.querySelectorAll('[data-dsec]')].map((w) => [w.dataset.dsec, w.querySelector('[data-dsec-toggle]').getAttribute('aria-expanded'), w.querySelector('[data-dsec-toggle]').getBoundingClientRect().height]));
           const open = r.filter((x) => x[1] === 'true').map((x) => x[0]);
           if (open.join() !== 'pos') out.push(`expected only positions open, got ${open.join() || 'none'}`);

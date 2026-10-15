@@ -11,12 +11,12 @@ const move = (from, to) => (fin(from) && fin(to) && from > 0 ? ((to - from) / fr
  * Inline SVG: the forecast band (middle 80% of paths), the median, and the real closes. Entry/stop/target lines show only when they
  * fall inside the plotted price range, so a far-away stop does not squash the chart. Returns '' when there is nothing to draw.
  */
-export function chartSvg(item) {
+export function chartSvg(item, { levels = false } = {}) {
   const b = item?.band;
   if (!b || !b.p50?.length) return '';
   const n = b.p50.length;
   const actual = (item.actual || []).map((a) => a.c).filter(fin);
-  const vals = [item.lastClose, ...b.p10, ...b.p90, ...actual].filter(fin);
+  const vals = [item.lastClose, ...b.p10, ...b.p90, ...actual, ...(levels ? [item.entry, item.stopLoss, item.takeProfit] : [])].filter(fin);
   let lo = Math.min(...vals);
   let hi = Math.max(...vals);
   if (hi === lo) {
@@ -61,4 +61,34 @@ export function compareSummary(s) {
   const inside = `${pct(s.inside)} of hours stayed inside the 80% band (a good forecast gives about 80%)`;
   const dir = `the median path pointed the right way in ${pct(s.directionRight)} of ${s.complete} finished forecasts`;
   return `${inside}; ${dir}. Under about 20 finished forecasts, treat this as a hint, not proof.`;
+}
+
+const signed = (m) => (m == null ? '—' : `${m > 0 ? '+' : ''}${m.toFixed(1)}%`);
+
+/**
+ * Plain numbers behind a forecast, worked out from the saved band, so an odd headline (like 0%) can be checked at a glance:
+ * where the median path ends, how wide the middle 80% is, and how far the stop and target are.
+ * `warning` is set when the paths are almost identical, which would mean the forecast service is not sampling.
+ */
+export function forecastFacts(item) {
+  const b = item?.band;
+  const n = b?.p50?.length;
+  if (!n || !fin(item.lastClose) || !(item.lastClose > 0)) return null;
+  const at = (arr) => ((arr[n - 1] - item.lastClose) / item.lastClose) * 100;
+  const median = at(b.p50);
+  const low = at(b.p10);
+  const high = at(b.p90);
+  const sgn = item.side === 'short' ? -1 : 1;
+  const stop = fin(item.stopLoss) && fin(item.entry) ? ((item.stopLoss - item.entry) / item.entry) * 100 : null;
+  const target = fin(item.takeProfit) && fin(item.entry) ? ((item.takeProfit - item.entry) / item.entry) * 100 : null;
+  const hours = item.horizonHours || n;
+  const mood = Math.abs(median) < 0.2 ? 'stay about flat' : median > 0 ? 'rise' : 'fall';
+  const helps = Math.abs(median) < 0.2 ? null : median * sgn > 0;
+  const spread = high - low;
+  const sentence = `Kronos expects the price to ${mood} over ${hours}h (median ${signed(median)}, middle 80% from ${signed(low)} to ${signed(high)}). The target needs ${signed(target)} and the stop is ${signed(stop)}${helps === null ? '. A flat price ends slightly behind after costs.' : helps ? '. That helps this trade.' : '. That works against this trade.'}`;
+  const warning = spread < 0.05 ? 'The paths are almost identical. The forecast service may not be drawing different paths.' : '';
+  // Most paths hit the stop although the closing prices never get there: the forecast candles' highs and lows did it.
+  const stopClose = fin(item.stopLoss) ? ((item.stopLoss - item.lastClose) / item.lastClose) * 100 : null;
+  const wicks = item.stats && item.stats.pStop >= 0.6 && stopClose != null && (sgn > 0 ? low > stopClose : high < stopClose) ? 'Most paths touch the stop through short spikes (candle highs and lows), not through their closing prices.' : '';
+  return { median, low, high, stop, target, hours, helps, sentence, warning, wicks };
 }

@@ -19,6 +19,12 @@ const STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected', expired: 'Exp
 
 /* ---------- badge in the nav + document title ---------- */
 
+/** The AI checker and Kronos on one strip: small buttons until used, then one short result each. */
+function toolsHtml(p) {
+  const inner = judgeRowHtml(p) + kronosRowHtml(p);
+  return inner ? `<div class="pc-tools">${inner}</div>` : '';
+}
+
 export function applyBadge() {
   const n = state.locked ? 0 : pendingCount();
   const b = $('nav-badge');
@@ -87,8 +93,7 @@ export function cardHtml(v, busy, msg, p = null) {
     <div class="rbar pc-bar" role="img" aria-label="${esc(barLabel)}" style="background:${bar}"><span class="rentry" style="left:${v.entryAt * 100}%"></span></div>
     ${v.reason ? `<div class="pc-why"><span class="lbl">WHY</span><div class="clamp">${esc(v.reason)}</div></div>` : ''}
     ${newsCtxHtml(v.news)}
-    ${p ? judgeRowHtml(p) : ''}
-    ${p ? kronosRowHtml(p) : ''}
+    ${p ? toolsHtml(p) : ''}
     ${p ? whyHtml(p) : ''}
     ${riskHtml(v)}
     ${p ? (personaBadge(p) ? `<p class="pc-src dim">${personaBadge(p)}</p>` : '') : `<p class="pc-src dim">${v.demo ? 'Demo AI' : 'AI'}${v.model ? ` · ${esc(v.model)}` : ''}</p>`}

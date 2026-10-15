@@ -1,4 +1,5 @@
 import { api, escapeHtml as esc } from './api.js';
+import { chartSvg, forecastFacts } from './kronos-logic.js';
 import { state } from './state.js';
 import { toast } from './ui.js';
 
@@ -25,14 +26,22 @@ export function kronosRowHtml(p) {
   const ui = state.kronosUi[p.id] || {};
   const k = one(p);
   if (!k && !state.status?.forecastConfigured) return '';
-  if (ui.busy) return '<div class="pc-judge pc-judge-busy" role="status"><span class="spin" aria-hidden="true"></span> Kronos is drawing possible price paths…</div>';
-  if (!k) return `<div class="pc-judge"><button type="button" class="btn-ghost pcj-btn" data-act="forecast">📈 Forecast with Kronos</button><small class="dim">Simulates possible price paths. No AI budget used.</small>${ui.error ? `<p class="pcj-err" role="alert">${esc(ui.error)}</p>` : ''}</div>`;
+  if (ui.busy) return '<div class="pc-judge pc-judge-busy" role="status"><span class="spin" aria-hidden="true"></span> Kronos is drawing price paths…</div>';
+  if (!k) return `<button type="button" class="btn-ghost pcj-btn" data-act="forecast" title="Simulates possible price paths. No AI budget used.">📈 Forecast</button>${ui.error ? `<p class="pcj-err" role="alert">${esc(ui.error)}</p>` : ''}`;
   const s = k.stats;
   const tone = s.call === 'take' ? 'good' : 'bad';
+  const facts = forecastFacts({ ...k, stats: s, side: p.side, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, horizonHours: k.horizonHours });
+  const chart = facts ? chartSvg({ ...k, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, actual: [] }, { levels: true }) : '';
   return `<div class="pc-judge pc-judge-${tone}">
-    <div class="pcj-head"><span class="lbl">KRONOS</span><span class="pcj-call pcj-${tone}">${s.call === 'take' ? 'TAKE' : 'SKIP'}</span><span><strong class="mono">${pctText(s.meanP)}</strong> of paths end in profit</span></div>
-    <div class="pcj-meta dim">${esc(`${pctText(s.pTarget)} hit target · ${pctText(s.pStop)} hit stop · ${s.n} paths · ${k.horizonHours}h`)}${s.edge != null ? esc(` · ${s.edge >= 0 ? '+' : ''}${Math.round(s.edge * 100)} pts vs break-even`) : ''}</div>
-    <div class="pcj-foot dim">A model guess. It can be wrong. Loss review shows its record. <button type="button" class="linklike" data-act="forecast-redo">Run again</button></div>
+    <div class="pcj-head"><span class="lbl">KRONOS</span><span class="pcj-call pcj-${tone}">${s.call === 'take' ? 'TAKE' : 'SKIP'}</span><span><strong class="mono">${pctText(s.meanP)}</strong> end in profit</span></div>
+    ${facts ? `<div class="pcj-meta dim">${esc(`Median ${facts.median > 0 ? '+' : ''}${facts.median.toFixed(1)}% · target needs ${facts.target > 0 ? '+' : ''}${facts.target.toFixed(1)}%`)}</div>` : ''}
+    <details class="pcj-det"><summary>Chart and numbers</summary>
+      ${chart ? `<div class="kr-chart" role="img" aria-label="${esc(facts.sentence)}">${chart}</div><p class="dim kr-key"><span class="kr-k kr-k-band"></span> middle 80% of paths <span class="kr-k kr-k-med"></span> median <span class="kr-k kr-k-tgt"></span> target <span class="kr-k kr-k-stop"></span> stop</p>` : ''}
+      ${facts ? `<p class="pcj-note">${esc(facts.sentence)}</p>` : ''}
+      ${facts?.warning ? `<p class="pcj-err">${esc(facts.warning)}</p>` : ''}
+      ${facts?.wicks ? `<p class="pcj-note">${esc(facts.wicks)}</p>` : ''}
+      <p class="dim pcj-note">${esc(`${pctText(s.pTarget)} hit the target, ${pctText(s.pStop)} hit the stop, ${pctText(s.pTime)} still open at the time limit (${s.n} paths). A model guess. It can be wrong. Loss review shows its record.`)}</p>
+      <div class="pcj-foot dim"><span>${esc(k.model || '')}</span> <button type="button" class="linklike" data-act="forecast-redo">Run again</button></div></details>
     ${ui.error ? `<p class="pcj-err" role="alert">${esc(ui.error)}</p>` : ''}</div>`;
 }
 

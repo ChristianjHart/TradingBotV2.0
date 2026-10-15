@@ -1923,8 +1923,11 @@ a.btn-accent, a.btn-ghost { display: inline-flex; align-items: center; justify-c
 .page:has(> .grid-top) > .grid-top, .page:has(> .grid-top) > .grid-ai, .page:has(> .grid-top) > .grid-news, .page:has(> .grid-top) > .grid-fun { display: contents; }
 .page:has(> .grid-top) .widget { margin: 0; min-height: 0; }
 .page:has(> .grid-top) .perf-section { margin: 0; }
-#dsec-pos { order: 1; } #dsec-sum { order: 2; } #dsec-picks { order: 3; } #dsec-news { order: 4; } #dsec-cal { order: 5; } #dsec-perf { order: 6; } #dsec-review { order: 7; }
-#dsec-fun { order: 8; } #dsec-totw { order: 9; } #dsec-alloc { order: 10; } #dsec-sched { order: 11; } #sec-budget-w { order: 12; } #sys-strip { order: 13; }
+#dsec-pos { order: 1; } #dsec-sum { order: 2; } #dsec-perf { order: 3; } #dsec-review { order: 4; } #btn-more { order: 5; }
+#dsec-picks { order: 6; } #dsec-news { order: 7; } #dsec-cal { order: 8; } #dsec-fun { order: 9; } #dsec-totw { order: 10; } #dsec-alloc { order: 11; } #dsec-sched { order: 12; } #sec-budget-w { order: 13; } #sys-strip { order: 14; }
+/* Secondary sections stay hidden until "More sections" is pressed (the choice is remembered). */
+.page:not(.show-more) [data-dsec][data-secondary] { display: none; }
+.more-btn { align-self: stretch; min-height: 44px; }
 
 .dsec-hw { display: flex; align-items: center; gap: 8px; }
 .widget[data-dsec] > .widget-title { display: none; }
@@ -2428,3 +2431,13 @@ details.pc-risk > summary:focus-visible { outline: 2px solid #60a5fa; outline-of
 .kr-k-band { height: 8px; border: 0; background: rgba(147,197,253,.35); }
 .kr-k-med { border-top-color: #93c5fd; border-top-style: dashed; }
 .kr-k-real { border-top-color: #f8fafc; }
+
+/* One strip for the AI tools on a card: small buttons side by side, results full width */
+.pc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.pc-tools > .pc-judge, .pc-tools > .pcj-err { flex: 1 1 100%; }
+.pc-tools > .pcj-btn { flex: 0 0 auto; }
+.pc-judge .kr-chart { margin: 4px 0; }
+.kr-k-tgt { border-top-color: var(--green-text); border-top-style: dashed; }
+.kr-k-stop { border-top-color: var(--red-text); border-top-style: dashed; }
+/* once a run is done, one line is enough: the step list is only for a run in progress */
+.run-bar.run-done .stepper { display: none; }

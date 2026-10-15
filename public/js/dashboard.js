@@ -162,6 +162,7 @@ export function mountDashboard() {
         </div>
       </section>
     </div>
+    <button type="button" class="btn-ghost more-btn" id="btn-more" aria-expanded="false">More sections</button>
     <section class="widget review-card" aria-labelledby="h-review" id="dsec-review" data-dsec="review">${sectionHeadHtml('review')}<h2 class="widget-title" id="h-review"><span>LOSS REVIEW</span></h2><div id="w-review"></div></section>
     <section class="widget perf-section" aria-labelledby="h-perf" id="dsec-perf" data-dsec="perf">${sectionHeadHtml('perf', { href: '#performance', label: 'Details' })}<h2 class="widget-title" id="h-perf"><span>PERFORMANCE</span></h2>${perfShellHtml({ compact: true })}</section>
   </div>`;
